@@ -31,7 +31,11 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+# parents[2], not [1]: this file sits in shelf_dispenser/ros/, so the repo root
+# is two levels up.  It was [1] while the ROS helpers lived directly in the
+# package directory, and a move is exactly the kind of change that leaves a
+# relative depth silently wrong.
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 import rclpy
