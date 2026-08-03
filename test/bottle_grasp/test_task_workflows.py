@@ -319,6 +319,10 @@ def test_from_pregrasp_verifies_current_hover_and_skips_completed_transit(tmp_pa
     assert result.object_state == ObjectState.EMPTY.value
 
 
+@pytest.mark.skip(
+    reason="桌面送货入口已关闭（task.py 里 DeliverMode.DISPENSE 直接拒）。"
+    "代码和这些测试都保留：重开入口时它们就是验收标准"
+)
 def test_dispense_uses_body_and_live_side_table_flow_before_home(tmp_path):
     demo = FakeDemo(tmp_path, StartMode.FROM_OBSERVATION)
     demo.args.dispense = True
@@ -518,6 +522,10 @@ def test_from_start_can_stop_after_real_observation_without_grasp(tmp_path):
     assert result.object_state == ObjectState.EMPTY.value
 
 
+@pytest.mark.skip(
+    reason="桌面送货入口已关闭（task.py 里 DeliverMode.DISPENSE 直接拒）。"
+    "代码和这些测试都保留：重开入口时它们就是验收标准"
+)
 def test_stop_after_with_body_guard_keeps_the_gripper_untouched(tmp_path):
     """Exercise actual SHELF_READY before the real gripper preflight branch."""
     demo = FakeDemo(tmp_path, StartMode.FROM_OBSERVATION)
@@ -579,6 +587,10 @@ def test_stop_after_with_body_guard_keeps_the_gripper_untouched(tmp_path):
     assert result.object_state == ObjectState.EMPTY.value
 
 
+@pytest.mark.skip(
+    reason="桌面送货入口已关闭（task.py 里 DeliverMode.DISPENSE 直接拒）。"
+    "代码和这些测试都保留：重开入口时它们就是验收标准"
+)
 def test_shelf_ready_92_degree_guard_aborts_before_any_arm_or_gripper_path(tmp_path):
     demo = FakeDemo(tmp_path, StartMode.FROM_OBSERVATION)
     demo.args.execute = True
@@ -596,6 +608,10 @@ def test_shelf_ready_92_degree_guard_aborts_before_any_arm_or_gripper_path(tmp_p
     assert chassis.stops == 3
 
 
+@pytest.mark.skip(
+    reason="桌面送货入口已关闭（task.py 里 DeliverMode.DISPENSE 直接拒）。"
+    "代码和这些测试都保留：重开入口时它们就是验收标准"
+)
 def test_held_or_unknown_failure_never_homes_or_returns_the_body(tmp_path):
     demo = FakeDemo(tmp_path, StartMode.FROM_OBSERVATION)
 
@@ -619,6 +635,10 @@ def test_held_or_unknown_failure_never_homes_or_returns_the_body(tmp_path):
     assert task.phase is TaskPhase.ABORTED
 
 
+@pytest.mark.skip(
+    reason="桌面送货入口已关闭（task.py 里 DeliverMode.DISPENSE 直接拒）。"
+    "代码和这些测试都保留：重开入口时它们就是验收标准"
+)
 def test_done_is_impossible_until_body_and_lift_restore_succeeds(tmp_path):
     demo = FakeDemo(tmp_path, StartMode.FROM_OBSERVATION)
 
@@ -744,3 +764,15 @@ def test_two_runs_started_at_the_same_timestamp_get_distinct_evidence_dirs(
         for demo in (first, second):
             logging.getLogger().removeHandler(demo.run_log_handler)
             demo.run_log_handler.close()
+
+
+def test_the_side_table_dispense_entry_is_closed():
+    """Kept as code, closed as an entry -- and that has to be checkable."""
+    from bottle_grasp.task import DeliverMode
+
+    task = BottlePickPlaceTask.__new__(BottlePickPlaceTask)
+    task.demo = SimpleNamespace(
+        args=SimpleNamespace(task_mode="from-start", dispense=True)
+    )
+    with pytest.raises(SafetyAbort, match="桌面送货入口已关闭"):
+        task.run(StartMode.FROM_START, deliver_mode=DeliverMode.DISPENSE)

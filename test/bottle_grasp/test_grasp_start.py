@@ -107,28 +107,3 @@ def test_mtc_pick_entry_consumes_grasp_start_gate_before_execute_pick():
     gate = source.index("profile.assert_grasp_start(")
     dispatch = source.index("run = execute_pick if cli.mode")
     assert gate < dispatch
-
-
-def test_lift_transfer_contract_carries_the_taught_start_pose():
-    """Regression: the contract once held a 2026-07-16 table-demo home pose.
-
-    Nothing in the code caught that, because the contract stores the joint
-    angles rather than referencing the profile, so a stale copy still loads and
-    the arm gets driven somewhere nobody taught.
-    """
-    contract = json.loads(
-        (
-            Path(__file__).resolve().parents[2]
-            / "bottle_grasp/lift_transfer_647_to_250.json"
-        ).read_text(encoding="utf-8")
-    )
-    profile = load_safety_profile(
-        PROFILES, "shelf_template", require_verified=False
-    )
-    assert contract["right_joints_deg"] == pytest.approx(
-        list(profile.grasp_start_right_joints_deg)
-    )
-    assert contract["left_joints_deg"] == pytest.approx(
-        list(profile.grasp_start_left_joints_deg)
-    )
-    assert contract["source_height_mm"] == profile.grasp_start_lift_height_mm

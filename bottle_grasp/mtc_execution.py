@@ -261,40 +261,6 @@ def _pick_candidate_pose(scenario: dict, candidate_id: str) -> np.ndarray:
     return pose
 
 
-def load_lift_transfer_contract(path: str | Path) -> dict:
-    try:
-        contract = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise SafetyAbort(f"升降安全契约无法读取: {exc}") from exc
-    if not isinstance(contract, dict):
-        raise SafetyAbort("升降安全契约顶层必须是对象")
-    if contract.get("schema_version") != "grabber.lift_transfer.v1":
-        raise SafetyAbort("升降安全契约版本无效")
-    if contract.get("verified") is not True:
-        source = contract.get("source_height_mm", "?")
-        target = contract.get("target_height_mm", "?")
-        raise SafetyAbort(f"{source}→{target} mm 双臂/底盘净空尚未实机验证")
-    if not isinstance(contract.get("evidence_id"), str) or not contract["evidence_id"]:
-        raise SafetyAbort("升降安全契约缺少 evidence_id")
-    for key in ("right_joints_deg", "left_joints_deg"):
-        joints = np.asarray(contract.get(key), dtype=float)
-        if joints.shape != (7,) or not np.all(np.isfinite(joints)):
-            raise SafetyAbort(f"升降安全契约 {key} 必须是七个有限关节角")
-    source = contract.get("source_height_mm")
-    target = contract.get("target_height_mm")
-    if (
-        isinstance(source, bool)
-        or not isinstance(source, int)
-        or isinstance(target, bool)
-        or not isinstance(target, int)
-        or source <= target
-        or not 0 <= target <= 2600
-        or not 0 <= source <= 2600
-    ):
-        raise SafetyAbort("升降安全契约源/目标高度无效")
-    return contract
-
-
 def load_gripper_calibration_record(
     path: str | Path, *, max_age_s: float = 900.0
 ) -> dict:
@@ -351,8 +317,9 @@ def _assert_chassis_still(state, *, label: str) -> None:
 
 def execute_lift_transfer(
     pick_record: dict,
-    contract: dict,
     *,
+    profile,
+    target_height_mm: int,
     robot,
     left_reader,
     lift,
@@ -360,7 +327,14 @@ def execute_lift_transfer(
     speed: int = 30,
     params: DemoParams | None = None,
 ) -> dict:
-    """Lower a held bottle only from a physically verified compact dual-arm pose."""
+    """Lower a held bottle, with both arms on the taught start pose.
+
+    The taught pose is read from the safety profile, not from a side file that
+    holds a copy of the joint angles.  A copy is how the lift ended up driving
+    the arm to a pose taught weeks earlier for a different task: nothing checks
+    a copy against its source, so it goes stale silently.  One source, and the
+    checks below are all against live readings.
+    """
     params = params or DemoParams()
     if not 1 <= int(speed) <= 30:
         raise SafetyAbort("升降速度必须在 1..30")
@@ -371,9 +345,20 @@ def execute_lift_transfer(
         or not isinstance(pick_record.get("completion"), dict)
     ):
         raise SafetyAbort("升降只接受已完成的 MTC pick 执行证据")
+    source_height_mm = profile.grasp_start_lift_height_mm
+    if source_height_mm is None:
+        raise SafetyAbort(f"profile {profile.name} 未配置 grasp_start_lift_height_mm")
+    if not 0 <= int(target_height_mm) < int(source_height_mm):
+        raise SafetyAbort(
+            f"升降目标高度 {target_height_mm} 必须低于起始高度 {source_height_mm}"
+        )
     completion = pick_record["completion"]
-    expected_right = np.asarray(contract["right_joints_deg"], dtype=float)
-    expected_left = np.asarray(contract["left_joints_deg"], dtype=float)
+    expected_right = np.asarray(
+        profile.grasp_start_right_joints_deg, dtype=float
+    )
+    expected_left = np.asarray(profile.grasp_start_left_joints_deg, dtype=float)
+    if expected_right.shape != (7,) or expected_left.shape != (7,):
+        raise SafetyAbort(f"profile {profile.name} 的抓取起点双臂关节角不完整")
     # A pick ends where its Cartesian retreat ends, which is on the shelf IK
     # branch, not tucked.  Tucking is a separate validated move that records
     # itself here, so accept its evidence in place of the trajectory's own
@@ -390,11 +375,9 @@ def execute_lift_transfer(
         or float(np.max(np.abs(recorded_right - expected_right)))
         > params.planned_start_tolerance_deg
     ):
-        raise SafetyAbort("pick 执行终点不是已验证的升降右臂收拢位")
-    if int(completion.get("lift_start_mm", -1)) != int(
-        contract["source_height_mm"]
-    ):
-        raise SafetyAbort("pick 执行高度与升降安全契约源高度不一致")
+        raise SafetyAbort("pick 执行终点不是示教的抓取起点位姿")
+    if int(completion.get("lift_start_mm", -1)) != int(source_height_mm):
+        raise SafetyAbort("pick 执行高度与示教的起始升降高度不一致")
 
     validate_hardware_preflight(robot)
     actual_right = np.asarray(robot.joints_deg(), dtype=float)
@@ -404,7 +387,7 @@ def execute_lift_transfer(
         or float(np.max(np.abs(actual_right - expected_right)))
         > params.planned_start_tolerance_deg
     ):
-        raise SafetyAbort("实时右臂不在已验证的升降收拢位")
+        raise SafetyAbort("实时右臂不在示教的抓取起点位姿")
     _assert_left(
         left_reader, expected_left, params.planned_start_tolerance_deg
     )
@@ -416,11 +399,11 @@ def execute_lift_transfer(
     )
 
     before_lift = lift.state()
-    _assert_lift_matches(before_lift, int(contract["source_height_mm"]))
+    _assert_lift_matches(before_lift, int(source_height_mm))
     before_chassis = chassis.state()
     _assert_chassis_still(before_chassis, label="升降前")
-    after_lift = lift.move_to(int(contract["target_height_mm"]), speed=int(speed))
-    _assert_lift_matches(after_lift, int(contract["target_height_mm"]))
+    after_lift = lift.move_to(int(target_height_mm), speed=int(speed))
+    _assert_lift_matches(after_lift, int(target_height_mm))
     after_chassis = chassis.state()
     _assert_chassis_still(after_chassis, label="升降后")
     translation = math.hypot(
@@ -442,7 +425,7 @@ def execute_lift_transfer(
     if float(np.max(np.abs(actual_right - expected_right))) > (
         params.planned_start_tolerance_deg
     ):
-        raise SafetyAbort("升降后右臂偏离安全收拢位")
+        raise SafetyAbort("升降后右臂偏离示教的抓取起点位姿")
     _assert_left(
         left_reader, expected_left, params.planned_start_tolerance_deg
     )
@@ -452,13 +435,13 @@ def execute_lift_transfer(
     )
     held_tcp = matrix_pose(robot.current_tcp())
     return {
-        "source_height_mm": int(contract["source_height_mm"]),
+        "source_height_mm": int(source_height_mm),
         "target_height_mm": int(after_lift.height_mm),
         "right_joints_deg": actual_right.tolist(),
         "left_joints_deg": expected_left.tolist(),
         "held_tcp_base_xyz_rpy_rad": held_tcp,
         "gripper_holding_feedback": feedback,
-        "clearance_evidence_id": contract["evidence_id"],
+        "taught_pose_profile": profile.name,
     }
 
 

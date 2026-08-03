@@ -16,7 +16,6 @@ from bottle_grasp.mtc_execution import (
     execute_pick,
     execute_place,
     load_gripper_calibration_record,
-    load_lift_transfer_contract,
 )
 from bottle_grasp.mtc_pick_contract import (
     EXPECTED_JOINTS,
@@ -615,35 +614,17 @@ def test_pick_executor_rejects_mtc_realman_fk_mismatch_before_opening():
     assert robot.events == [("validate", 6)]
 
 
-def test_lift_transfer_requires_verified_contract_and_compact_both_arms(tmp_path):
-    unverified = tmp_path / "unverified.json"
-    unverified.write_text(
-        json.dumps(
-            json.loads(
-                (
-                    Path(__file__).resolve().parents[2]
-                    / "bottle_grasp/lift_transfer_647_to_250.json"
-                ).read_text(encoding="utf-8")
-            )
-            | {"verified": False, "evidence_id": ""}
-        ),
-        encoding="utf-8",
-    )
-    with pytest.raises(SafetyAbort, match="尚未实机验证"):
-        load_lift_transfer_contract(unverified)
+class _Profile:
+    """The taught start pose, as the safety profile carries it."""
 
-    contract = {
-        "schema_version": "grabber.lift_transfer.v1",
-        "verified": True,
-        "evidence_id": "physical-clearance-run",
-        "source_height_mm": 647,
-        "target_height_mm": 250,
-        "right_joints_deg": [5.0] * 7,
-        "left_joints_deg": list(range(21, 28)),
-    }
-    path = tmp_path / "verified.json"
-    path.write_text(json.dumps(contract), encoding="utf-8")
-    contract = load_lift_transfer_contract(path)
+    name = "shelf_template"
+    grasp_start_lift_height_mm = 647
+    grasp_start_right_joints_deg = [5.0] * 7
+    grasp_start_left_joints_deg = list(range(21, 28))
+
+
+def test_lift_transfer_reads_the_taught_pose_from_the_profile():
+    """No side file holding a copy of the joint angles that can go stale."""
     robot = _Robot([5.0] * 7, holding=True)
     lift = _Lift(647)
     completed = execute_lift_transfer(
@@ -656,7 +637,8 @@ def test_lift_transfer_requires_verified_contract_and_compact_both_arms(tmp_path
                 "empty_close_pos": 394,
             },
         },
-        contract,
+        profile=_Profile(),
+        target_height_mm=250,
         robot=robot,
         left_reader=_Left(list(range(21, 28))),
         lift=lift,
@@ -664,19 +646,35 @@ def test_lift_transfer_requires_verified_contract_and_compact_both_arms(tmp_path
     )
     assert lift.moves == [(250, 30)]
     assert completed["target_height_mm"] == 250
+    assert completed["source_height_mm"] == 647
+    assert completed["taught_pose_profile"] == "shelf_template"
+
+
+def test_lift_transfer_refuses_a_target_that_is_not_below_the_start():
+    record = {
+        "schema_version": "grabber.mtc_execution.v1",
+        "mode": "pick",
+        "completion": {
+            "final_right_joints_deg": [5.0] * 7,
+            "lift_start_mm": 647,
+            "empty_close_pos": 394,
+        },
+    }
+    for bad in (647, 700, -1):
+        with pytest.raises(SafetyAbort, match="必须低于起始高度"):
+            execute_lift_transfer(
+                record,
+                profile=_Profile(),
+                target_height_mm=bad,
+                robot=_Robot([5.0] * 7, holding=True),
+                left_reader=_Left(list(range(21, 28))),
+                lift=_Lift(647),
+                chassis=_Chassis(),
+            )
 
 
 def test_lift_transfer_accepts_a_recorded_post_pick_tuck():
     """A pick ends at its retreat; the tuck is a later move that records itself."""
-    contract = {
-        "schema_version": "grabber.lift_transfer.v1",
-        "verified": True,
-        "evidence_id": "physical-clearance-run",
-        "source_height_mm": 647,
-        "target_height_mm": 250,
-        "right_joints_deg": [5.0] * 7,
-        "left_joints_deg": list(range(21, 28)),
-    }
     completion = {
         "final_right_joints_deg": [130.0] * 7,  # the shelf-branch retreat
         "lift_start_mm": 647,
@@ -687,41 +685,33 @@ def test_lift_transfer_accepts_a_recorded_post_pick_tuck():
         "mode": "pick",
         "completion": completion,
     }
-    kwargs = dict(
-        robot=_Robot([5.0] * 7, holding=True),
-        left_reader=_Left(list(range(21, 28))),
-        lift=_Lift(647),
-        chassis=_Chassis(),
-    )
-    with pytest.raises(SafetyAbort, match="收拢位"):
-        execute_lift_transfer(record, contract, **kwargs)
+
+    def run(lift=None):
+        return execute_lift_transfer(
+            record,
+            profile=_Profile(),
+            target_height_mm=250,
+            robot=_Robot([5.0] * 7, holding=True),
+            left_reader=_Left(list(range(21, 28))),
+            lift=lift or _Lift(647),
+            chassis=_Chassis(),
+        )
+
+    with pytest.raises(SafetyAbort, match="抓取起点"):
+        run()
 
     completion["post_pick_tuck"] = {
         "right_joints_deg": [5.0] * 7,
         "max_error_deg": 0.18,
     }
     lift = _Lift(647)
-    execute_lift_transfer(
-        record,
-        contract,
-        robot=_Robot([5.0] * 7, holding=True),
-        left_reader=_Left(list(range(21, 28))),
-        lift=lift,
-        chassis=_Chassis(),
-    )
+    run(lift)
     assert lift.moves == [(250, 30)]
 
-    # A tuck stamp that disagrees with the contract is still refused.
+    # A tuck stamp that disagrees with the taught pose is still refused.
     completion["post_pick_tuck"]["right_joints_deg"] = [40.0] * 7
-    with pytest.raises(SafetyAbort, match="收拢位"):
-        execute_lift_transfer(
-            record,
-            contract,
-            robot=_Robot([5.0] * 7, holding=True),
-            left_reader=_Left(list(range(21, 28))),
-            lift=_Lift(647),
-            chassis=_Chassis(),
-        )
+    with pytest.raises(SafetyAbort, match="抓取起点"):
+        run()
 
 
 def test_gripper_calibration_record_must_be_fresh(tmp_path):

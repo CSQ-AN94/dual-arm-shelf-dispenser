@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from bottle_grasp.core import SafetyAbort
-from bottle_grasp.mtc_execution import load_lift_transfer_contract
 
 
 def run(command: list[str], *, timeout: float) -> None:
@@ -40,11 +39,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         required=True,
     )
-    parser.add_argument(
-        "--lift-contract",
-        type=Path,
-        default=ROOT / "bottle_grasp/lift_transfer_647_to_250.json",
-    )
+    parser.add_argument("--lift-target-mm", type=int, default=250)
     parser.add_argument("--arm-speed", type=int, default=100)
     parser.add_argument("--lift-speed", type=int, default=30)
     parser.add_argument(
@@ -64,7 +59,6 @@ def main(argv: list[str] | None = None) -> int:
         for low, high in zip(cli.lower_roi_min, cli.lower_roi_max)
     ):
         parser.error("--lower-roi-min 每一维都必须小于有限的 --lower-roi-max")
-    load_lift_transfer_contract(cli.lift_contract)
     run_dir = cli.output_dir / datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=False)
     python = sys.executable
@@ -183,8 +177,8 @@ def main(argv: list[str] | None = None) -> int:
             python,
             "scripts/execute_mtc_lift_transfer.py",
             str(pick_execution),
-            "--contract",
-            str(cli.lift_contract),
+            "--target-height-mm",
+            str(cli.lift_target_mm),
             "--record",
             str(lift_execution),
             "--speed",

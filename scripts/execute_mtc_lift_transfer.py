@@ -16,10 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 from bottle_grasp.core import DemoParams, SafetyAbort
 from bottle_grasp.mobile_body import LiftSocketAdapter, WooshChassisAdapter
-from bottle_grasp.mtc_execution import (
-    execute_lift_transfer,
-    load_lift_transfer_contract,
-)
+from bottle_grasp.mtc_execution import execute_lift_transfer
 from bottle_grasp.robot import ArmJointReader, RobotSession
 from bottle_grasp.safety import load_safety_profile
 from utils.config import load_config
@@ -29,9 +26,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pick_execution_record", type=Path)
     parser.add_argument(
-        "--contract",
-        type=Path,
-        default=ROOT / "bottle_grasp/lift_transfer_647_to_250.json",
+        "--target-height-mm",
+        type=int,
+        default=250,
+        help=(
+            "Height to lower to.  The starting height and both taught arm "
+            "poses come from the safety profile, so there is no second copy "
+            "of them to go stale"
+        ),
     )
     parser.add_argument("--config", default=str(ROOT / "config.yaml"))
     parser.add_argument(
@@ -42,12 +44,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--record", type=Path)
     parser.add_argument("--execute", action="store_true")
     cli = parser.parse_args(argv)
-    contract = load_lift_transfer_contract(cli.contract)
     pick_record = json.loads(
         cli.pick_execution_record.read_text(encoding="utf-8")
     )
     if not cli.execute:
-        print("升降安全契约和 pick 执行证据格式有效。")
+        print("pick 执行证据格式有效。")
         print("未指定 --execute：未连接机械臂、底盘或升降机构。")
         return 0
 
@@ -82,7 +83,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         completed = execute_lift_transfer(
             pick_record,
-            contract,
+            profile=profile,
+            target_height_mm=cli.target_height_mm,
             robot=robot,
             left_reader=left,
             lift=LiftSocketAdapter(
