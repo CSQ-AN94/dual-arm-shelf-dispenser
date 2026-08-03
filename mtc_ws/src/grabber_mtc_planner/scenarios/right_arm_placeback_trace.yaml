@@ -1,0 +1,62 @@
+# HISTORICAL REAL-GRASP FIXTURE — not live perception.
+#
+# Source: the 2026-07-22 grasp_lift.json evidence bundle.  The right arm
+# physically reached this TCP, closed on the bottle and lifted it 50 mm.
+# The recorded right_controller_base TCP and table_demo keepout were mapped
+# through the verified table_demo.T_moveit_from_profile into
+# platform_base_link.  This is the strongest regression fixture for an
+# execution-eligible right-arm grasp/place-back branch, but the bottle must be
+# localized again before real motion.
+scenario_id: right_arm_placeback_trace_v1
+frame_id: platform_base_link
+source_layer_id: historical_table_grasp
+target_layer_id: historical_table_grasp
+lift_state_id: live_platform_joint
+source_support_surface_id: table_top
+target_support_surface_id: table_top
+scene_version: table_demo@2026-07-22
+fixture_source: true
+start_state_source: current_state
+
+source_grasp_pose:
+  xyz: [-0.039145, -0.675478, -0.077272]
+  quat_xyzw: [0.710865, 0.420593, -0.278415, 0.490160]
+
+# The proven workflow placed the bottle back at the grasp location.
+target_place_pose:
+  xyz: [-0.039145, -0.675478, -0.077272]
+  quat_xyzw: [0.710865, 0.420593, -0.278415, 0.490160]
+
+source_approach_direction: [0.016485, -0.931075, -0.364456]
+source_retreat_direction: [-0.016485, 0.931075, 0.364456]
+target_insert_direction: [0.016485, -0.931075, -0.364456]
+target_retreat_direction: [-0.016485, 0.931075, 0.364456]
+
+source_pregrasp_offset_m: 0.085
+# ponytail: final contact-length knob; keep aligned with guarded grasp evidence.
+source_contact_distance_m: 0.020
+source_retreat_distance_m: 0.100
+target_preplace_offset_m: 0.085
+target_retreat_distance_m: 0.100
+cartesian_min_fraction: 0.5
+
+bottle:
+  id: bottle
+  radius_m: 0.033
+  height_m: 0.21
+  pose:
+    xyz: [-0.039104, -0.702833, -0.088398]
+    rpy_deg: [0.0, 0.0, 0.0]
+
+spawn_scene_objects: true
+shelf_boxes:
+  - id: table_top
+    size: [2.000000, 1.140000, 0.550000]
+    pose:
+      xyz: [-0.063111, -1.033489, -0.477710]
+      rpy_deg: [0.0, 0.0, 0.0]
+
+planner_id: RRTConnectkConfigDefault
+planning_timeout_s: 5.0
+max_ik_solutions: 8
+max_solutions: 10

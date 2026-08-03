@@ -1,0 +1,53 @@
+# Dual RM75 arm identities for the MTC shelf-transfer prototype.
+#
+# Both arms are ALWAYS planned.  `execution_eligible` never gates planning; it
+# only records whether this arm's tool chain is calibrated well enough that a
+# human may later approve real motion (Gate C).
+#
+# Sources for the numbers below:
+#   planning groups / link names : bottle_grasp/ompl_config.py, bottle_grasp/moveit_plan_once.py
+#   touch links                  : bottle_grasp/moveit_scene_helpers.py (tool guard attachment)
+#   TCP transform                : bottle_grasp/core.py -> moveit_link7_to_controller_flange_m (0.0172)
+#                                  + tcp_z_m (0.151) = 0.1682 m along +Z of link7,
+#                                  represented as a full rigid transform so tool
+#                                  rotation is never discarded.
+#                                  Re-verified 2026-07-24 G0.6 (residual 0.042 mm / 0.080 deg).
+#                                  THIS IS THE CALIBRATION KNOB — re-measure when the tool changes.
+arms:
+  - arm_id: right_arm
+    planning_group: right_arm
+    ik_link: r_link7
+    end_effector: ""          # the SRDF defines no <end_effector> at all (verified 2026-07-27)
+    hand_group: ""            # gripper is driven by the RealMan SDK, not by a ROS controller
+    touch_links: [r_link6, r_link7, r_hand]
+    home_state: home          # SRDF group_state, all joints 0 (verified 2026-07-27)
+    tool_id: bottle_gripper
+    tool_version: "2026-07-24-g0.6"
+    calibration_version: "2026-07-24-g0.6"
+    tcp_transform_from_ik_link:
+      [[1.0, 0.0, 0.0, 0.0],
+       [0.0, 1.0, 0.0, 0.0],
+       [0.0, 0.0, 1.0, 0.1682],
+       [0.0, 0.0, 0.0, 1.0]]
+    execution_eligible: true
+    execution_block_reason: ""
+
+  - arm_id: left_arm
+    planning_group: left_arm
+    ik_link: l_link7          # verified against dual_rm_75b_description.srdf 2026-07-27
+    end_effector: ""
+    hand_group: ""
+    touch_links: [l_link6, l_link7, l_hand_link]
+    home_state: home
+    tool_id: ""
+    tool_version: ""
+    calibration_version: ""
+    # Mirrored from the right arm so left-arm planning is possible at all.  It is
+    # NOT a measurement, which is exactly why the arm is execution-blocked.
+    tcp_transform_from_ik_link:
+      [[1.0, 0.0, 0.0, 0.0],
+       [0.0, 1.0, 0.0, 0.0],
+       [0.0, 0.0, 1.0, 0.1682],
+       [0.0, 0.0, 0.0, 1.0]]
+    execution_eligible: false
+    execution_block_reason: LEFT_TOOL_CALIBRATION_REQUIRED

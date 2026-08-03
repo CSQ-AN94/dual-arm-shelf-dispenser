@@ -1,0 +1,38 @@
+# 核心视觉框架
+torch
+torchvision
+ultralytics
+
+# 计算机视觉
+opencv-python
+numpy<2.0
+scipy
+Pillow
+pyrealsense2
+
+# 直接抓取主流程不需要自然语言；以下语音依赖保留给旧 main_agent.py
+sounddevice
+PyAudio
+sherpa-onnx
+google-genai
+
+# 机器人通信
+robotic-arm
+pyserial
+pymodbus
+python-can
+
+# 网络和配置
+websockets
+websocket-client
+requests
+pyyaml
+
+# 构建依赖
+pybind11==2.11.0
+pybind11-global==2.11.0
+wheel
+wrapt<1.16.0,>=1.12.0
+
+# 数据处理
+pandas

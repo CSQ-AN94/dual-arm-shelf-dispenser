@@ -1,0 +1,59 @@
+# REACHABILITY-PROBE FIXTURE — not a real shelf slot.
+#
+# shelf_transfer_fixture.yaml uses the real 2026-07-20 shelf measurement, and
+# that pose is NOT IK-reachable (verified 2026-07-27 with /compute_ik: both arms
+# return NO_IK_SOLUTION at the measured point, and only start solving ~0.15 m
+# further out of the shelf).  This scenario exists solely to exercise the whole
+# MTC backbone end to end at a pose the same probe proved reachable, so that
+# "the task never solves" and "this particular pose is unreachable" stay
+# distinguishable.  Do not treat it as a shelf coordinate.
+#
+# Orientation is the FK of the taught right-arm home joints from
+# safety_profiles.json (shelf_template.home_joints_deg) — a physically taught
+# wrist pose facing the shelf, not a derived one.  Its tool +Z axis is
+# (+0.113, -0.990, -0.088), which is why that is the approach direction.
+scenario_id: reachability_probe_v1
+frame_id: platform_base_link
+source_layer_id: probe_only
+target_layer_id: probe_only
+lift_state_id: platform_joint_0
+scene_version: probe@2026-07-27
+fixture_source: true
+start_state_source: current_state
+
+source_grasp_pose:
+  xyz: [0.034, -0.647, -0.115]
+  quat_xyzw: [0.487416, 0.553501, -0.452905, 0.500938]
+
+target_place_pose:
+  xyz: [0.134, -0.647, -0.115]
+  quat_xyzw: [0.487416, 0.553501, -0.452905, 0.500938]
+
+source_approach_direction: [0.113, -0.990, -0.088]
+source_retreat_direction: [-0.113, 0.990, 0.088]
+target_insert_direction: [0.113, -0.990, -0.088]
+target_retreat_direction: [-0.113, 0.990, 0.088]
+
+source_pregrasp_offset_m: 0.085
+source_retreat_distance_m: 0.100
+target_preplace_offset_m: 0.085
+target_retreat_distance_m: 0.150
+cartesian_min_fraction: 0.5
+
+bottle:
+  id: bottle
+  radius_m: 0.033
+  height_m: 0.21
+  pose:
+    xyz: [0.034, -0.647, -0.115]
+    rpy_deg: [0.0, 0.0, 0.0]
+
+# No shelf boxes: this is a free-space reachability probe, and injecting the
+# real shelf around a pose that is not a real shelf slot would be meaningless.
+spawn_scene_objects: true
+shelf_boxes: []
+
+planner_id: RRTConnectkConfigDefault
+planning_timeout_s: 5.0
+max_ik_solutions: 8
+max_solutions: 10

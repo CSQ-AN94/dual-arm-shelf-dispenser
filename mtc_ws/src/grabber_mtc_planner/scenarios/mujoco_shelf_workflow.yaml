@@ -1,0 +1,92 @@
+# Offline digital-twin fixture.  Dimensions match the measured shelf template,
+# while the right-arm source pose comes from the 2026-07-22 successful grasp
+# trace.  It is deliberately fixture_source and must never authorize hardware.
+scenario_id: mujoco_shelf_workflow_v1
+mode: full_transfer
+planning_arm_id: right_arm
+frame_id: platform_base_link
+source_layer_id: simulated_third_shelf
+target_layer_id: simulated_third_shelf_empty_slot
+lift_state_id: recorded_platform_joint_647mm
+source_support_surface_id: shelf_bottom
+target_support_surface_id: shelf_bottom
+scene_version: digital_twin@2026-07-29
+fixture_source: true
+start_state_source: current_state
+
+# roll_0 and roll_180 swapped values on 2026-08-03: the quaternion previously
+# labelled roll_180 here is the one the real arm used for the 2026-07-22 and
+# 2026-08-02 successful grasps, and is what installed_rmg24_tcp_rotation() now
+# emits for roll_0.
+source_grasp_pose:
+  xyz: [-0.039145, -0.675478, -0.077272]
+  quat_xyzw: [0.5, 0.5, -0.5, 0.5]
+source_grasp_candidates:
+  - id: horizontal_fingers_roll_0
+    pose:
+      xyz: [-0.039145, -0.675478, -0.077272]
+      quat_xyzw: [0.5, 0.5, -0.5, 0.5]
+  - id: horizontal_fingers_roll_180
+    pose:
+      xyz: [-0.039145, -0.675478, -0.077272]
+      quat_xyzw: [-0.5, 0.5, -0.5, -0.5]
+target_place_pose:
+  xyz: [0.020855, -0.675478, -0.077272]
+  quat_xyzw: [0.5, 0.5, -0.5, 0.5]
+
+source_approach_direction: [0.0, -1.0, 0.0]
+source_retreat_direction: [0.0, 1.0, 0.0]
+target_insert_direction: [0.0, -1.0, 0.0]
+target_retreat_direction: [0.0, 1.0, 0.0]
+source_pregrasp_offset_m: 0.140
+source_contact_distance_m: 0.105
+source_retreat_distance_m: 0.100
+target_preplace_offset_m: 0.140
+target_retreat_distance_m: 0.100
+cartesian_min_fraction: 0.5
+cartesian_transport: false
+local_motion_planner: pilz_lin
+
+bottle:
+  id: bottle
+  radius_m: 0.033
+  height_m: 0.21
+  pose:
+    xyz: [-0.039104, -0.702833, -0.088398]
+    rpy_deg: [0.0, 0.0, 0.0]
+
+spawn_scene_objects: true
+shelf_boxes:
+  - id: shelf_bottom
+    size: [0.700, 0.340, 0.040]
+    pose: {xyz: [0.030, -0.720, -0.213], rpy_deg: [0, 0, 0]}
+  - id: shelf_top
+    size: [0.700, 0.340, 0.040]
+    pose: {xyz: [0.030, -0.720, 0.177], rpy_deg: [0, 0, 0]}
+  - id: shelf_back
+    size: [0.700, 0.030, 0.390]
+    pose: {xyz: [0.030, -0.875, -0.018], rpy_deg: [0, 0, 0]}
+  # Nothing above or below this observed compartment may be assumed empty.
+  - id: unknown_upper_shelf_volume
+    size: [0.700, 0.340, 1.000]
+    pose: {xyz: [0.030, -0.720, 0.697], rpy_deg: [0, 0, 0]}
+  - id: unknown_lower_shelf_volume
+    size: [0.700, 0.340, 1.000]
+    pose: {xyz: [0.030, -0.720, -0.733], rpy_deg: [0, 0, 0]}
+
+# Two non-target bottles, voxelized as immutable PlanningScene obstacles.
+obstacle_voxel_size_m: 0.050
+obstacle_voxels:
+  - [-0.220, -0.703, -0.168]
+  - [-0.220, -0.703, -0.118]
+  - [-0.220, -0.703, -0.068]
+  - [-0.220, -0.703, -0.018]
+  - [0.300, -0.703, -0.168]
+  - [0.300, -0.703, -0.118]
+  - [0.300, -0.703, -0.068]
+  - [0.300, -0.703, -0.018]
+
+planner_id: RRTConnectkConfigDefault
+planning_timeout_s: 5.0
+max_ik_solutions: 8
+max_solutions: 10

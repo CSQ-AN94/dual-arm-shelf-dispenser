@@ -1,0 +1,117 @@
+# FIXTURE scenario: shelf slot A -> shelf slot B, one opaque bottle, fixed base.
+#
+# fixture_source: true — the poses below are NOT live perception.  They are the
+# 2026-07-20 on-site shelf measurement from bottle_grasp/safety_profiles.json
+# ("shelf_template", frame right_controller_base) pushed through that profile's
+# verified bridge T_moveit_from_profile (yaw 180 deg, translation
+# -0.062292 / -0.097784 / +0.008316) into the MoveIt planning frame
+# platform_base_link.  Re-measure before anyone asks for real motion.
+#
+# All poses are the desired TCP pose; the TCP offset from the IK link comes
+# from config/dual_rm75_arms.yaml.
+scenario_id: shelf_transfer_fixture_v1
+frame_id: platform_base_link
+source_layer_id: shelf_layer2_slot_center
+target_layer_id: shelf_layer2_slot_right
+lift_state_id: lift_as_measured_20260720
+source_support_surface_id: shelf_bottom
+target_support_surface_id: shelf_bottom
+scene_version: shelf_template@2026-07-21
+fixture_source: true
+start_state_source: current_state
+
+# Installed RMG24 orientation: TCP +Z enters the shelf, TCP +Y is the physical
+# finger-opening axis, and TCP +X points down along the palm.  The gripper base
+# is mounted +90 degrees about r_link7 Z, so treating TCP +X as the opening axis
+# would rotate the fingers vertical.  These quaternions were the -X variant
+# until the 2026-08-02 demonstration showed that is the grasp rolled 180
+# degrees about the approach axis; see installed_rmg24_tcp_rotation().
+source_grasp_pose:
+  xyz: [0.051008, -0.795384, -0.128284]
+  quat_xyzw: [0.5, 0.5, -0.5, 0.5]
+
+# Same layer, one slot to the side.  Purely a fixture until a real second slot
+# is measured on site.
+target_place_pose:
+  xyz: [0.201008, -0.795384, -0.128284]
+  quat_xyzw: [0.5, 0.5, -0.5, 0.5]
+
+# Shelf opening faces -Y in platform_base_link, so the arm drives in along -Y
+# and backs out along +Y.
+source_approach_direction: [0.0, -1.0, 0.0]
+# Pick-only first clears the support vertically, then exits along the reverse
+# approach direction. Both legs remain collision checked.
+source_lift_direction: [0.0, 0.0, 1.0]
+source_retreat_direction: [0.0, 1.0, 0.0]
+target_insert_direction: [0.0, -1.0, 0.0]
+target_retreat_direction: [0.0, 1.0, 0.0]
+
+source_pregrasp_offset_m: 0.085
+# ponytail: final contact-length knob; tune from the first guarded shelf run.
+source_contact_distance_m: 0.020
+source_lift_distance_m: 0.050
+# Retrace the way in rather than pushing past it.  The arm reached the grasp
+# from a standoff this far back, so backing out the same distance is provably
+# clear; anything longer is space the arm has never occupied.  Replaying the
+# 2026-08-02 scene on the robot: 0.175 and 0.200 return zero solutions, and
+# once the grasp IK is biased toward the demonstrated posture even 0.150 does
+# -- that posture reaches the bottle but cannot retreat far from it.  At 0.085
+# the same eight replays gave five solutions and no contorted ones.
+source_retreat_distance_m: 0.085
+# Placing lowers a bottle onto the shelf rather than reaching around one, so
+# the last guarded leg is short.  A long one just drags the held bottle
+# through more of the slot, past whatever is already standing there.  Untested
+# on hardware: the place branch has never planned on the real shelf.
+target_preplace_offset_m: 0.040
+# Same finding as the source retreat above, applied before it can bite.
+target_retreat_distance_m: 0.150
+cartesian_min_fraction: 0.6
+
+bottle:
+  id: bottle
+  radius_m: 0.033
+  height_m: 0.21
+  # Cylinder centre; the measured point is the grasp point, so the cylinder is
+  # centred on it rather than on the true bottle centroid.
+  pose:
+    xyz: [0.051008, -0.795384, -0.128284]
+    rpy_deg: [0.0, 0.0, 0.0]
+
+# Converted from shelf_template.keepout_boxes.  Set spawn_scene_objects: false
+# once the live PlanningScene already publishes the shelf.
+spawn_scene_objects: true
+shelf_boxes:
+  - id: shelf_bottom
+    size: [0.670000, 0.460000, 0.536000]
+    pose:
+      xyz: [0.052708, -0.867784, -0.473684]
+      rpy_deg: [0.0, 0.0, 0.0]
+  - id: shelf_top
+    size: [0.630000, 0.170000, 0.521800]
+    pose:
+      xyz: [0.072708, -1.012784, 0.397416]
+      rpy_deg: [0.0, 0.0, 0.0]
+  - id: shelf_back
+    size: [0.510000, 0.641600, 0.400000]
+    pose:
+      xyz: [0.102708, -1.276984, 0.008316]
+      rpy_deg: [0.0, 0.0, 0.0]
+
+# RRTConnect is a feasibility planner with no objective of its own, kept
+# deliberately: it is the fast one. The preference lives in the cost weights
+# below, which MTC uses to expand solutions best-first — so the bias costs no
+# extra planning time. Switching to an anytime optimizer (RRTstar, BiTRRT) would
+# always burn the full timeout and needs on-robot timing evidence first.
+planner_id: RRTConnectkConfigDefault
+# The candidate set doubled when roll-180 was added, so the per-candidate share
+# of a fixed budget halved.  Planning is offline relative to the shelf: a run
+# that takes 15 s instead of 5 s and returns a well-conditioned solution beats
+# a fast one that the controller then refuses.
+planning_timeout_s: 15.0
+max_ik_solutions: 24
+max_solutions: 20
+# Per-joint path-cost weights, base joint first. Equal weights price a wrist
+# roll like a shoulder sweep, which is what made "shortest" solutions look
+# uncoordinated. TUNING KNOB: raise the leading entries to keep the shoulder
+# stiller and let the wrist do more of the work.
+planning_joint_weights: [3.0, 3.0, 2.0, 2.0, 1.0, 1.0, 1.0]
