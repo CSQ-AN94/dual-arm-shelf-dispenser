@@ -1,7 +1,7 @@
 # FIXTURE scenario: shelf slot A -> shelf slot B, one opaque bottle, fixed base.
 #
 # fixture_source: true — the poses below are NOT live perception.  They are the
-# 2026-07-20 on-site shelf measurement from bottle_grasp/safety_profiles.json
+# 2026-07-20 on-site shelf measurement from shelf_dispenser/safety_profiles.json
 # ("shelf_template", frame right_controller_base) pushed through that profile's
 # verified bridge T_moveit_from_profile (yaw 180 deg, translation
 # -0.062292 / -0.097784 / +0.008316) into the MoveIt planning frame

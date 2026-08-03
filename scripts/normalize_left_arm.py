@@ -12,10 +12,10 @@ Two things made that chain unreachable for the left arm, and both are fixed:
 
   * The RealMan SDK's Algo is process-global, so a second RobotSession in this
     process would overwrite the right arm's kinematics.  ArmProxy gives the left
-    arm its own process (bottle_grasp/arm_worker.py).
+    arm its own process (shelf_dispenser/arm_worker.py).
   * Every fence box is expressed in the right arm's base frame, 120 mm from the
     left arm's own.  left_view moves the fence over once, using the measured
-    dual-arm transform from config.yaml (bottle_grasp/left_arm.py).
+    dual-arm transform from config.yaml (shelf_dispenser/left_arm.py).
 
 Defaults to a dry run.  Nothing moves without --execute.
 
@@ -36,12 +36,12 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.core import DemoParams, SafetyAbort
-from bottle_grasp.left_arm import arrival_error_deg, left_view, open_left_arm
-from bottle_grasp.planner import MoveItPlanner
-from bottle_grasp.robot import ArmJointReader
-from bottle_grasp.safe_planner import PlanTarget, SafeMotionPlanner
-from bottle_grasp.safety import load_safety_profile
+from shelf_dispenser.core import DemoParams, SafetyAbort
+from shelf_dispenser.left_arm import arrival_error_deg, left_view, open_left_arm
+from shelf_dispenser.planner import MoveItPlanner
+from shelf_dispenser.arm import ArmJointReader
+from shelf_dispenser.safe_planner import PlanTarget, SafeMotionPlanner
+from shelf_dispenser.safety import load_safety_profile
 from utils.config import load_config
 
 LOG = logging.getLogger("normalize_left_arm")
@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=str(ROOT / "config.yaml"))
     parser.add_argument(
         "--safety-config",
-        default=str(ROOT / "bottle_grasp" / "safety_profiles.json"),
+        default=str(ROOT / "shelf_dispenser" / "safety_profiles.json"),
     )
     parser.add_argument(
         "--output-dir", default=str(ROOT / "outputs" / "left_arm_normalize")

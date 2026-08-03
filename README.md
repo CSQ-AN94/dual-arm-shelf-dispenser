@@ -29,15 +29,27 @@ honest per-stage picture is in `docs/`.
 ## Layout
 
 ```
-bottle_grasp/     the library: safety fence, kinematics, scene, execution contracts
-mtc_ws/           ROS 2 workspace, MoveIt Task Constructor planner (C++)
-scripts/          one entry point per pipeline stage
-test/             555 tests, no hardware needed
+shelf_dispenser/       the library
+    orchestrator.py    one run's hardware, scene and planning state
+    arm.py             one RealMan arm: connection, IK, motion primitives
+    arm_worker.py      the second arm, in its own process
+    safety.py          the electronic fence
+    left_arm.py        the fence, expressed in the left arm's base frame
+    ros/               entry points run by the system Python, by path
+mtc_ws/                ROS 2 workspace, MoveIt Task Constructor planner (C++)
+scripts/               one entry point per pipeline stage
+test/                  543 tests, no hardware needed
 ```
 
-The package is still named `bottle_grasp` — renaming it touches 141 sites
-including C++ source-text assertions, and that is not worth doing on a day the
-robot is on the bench.
+Names describe what is behind the interface, not where the code came from.
+`ros/` is the realest seam in the repo — those modules never share an
+interpreter with their caller — and is named `ros` rather than `moveit` so it
+cannot shadow MoveIt's own package.
+
+`orchestrator.py` is 4950 lines and trips the god-module check in
+`scripts/architecture_report.py`. That is the next real piece of work: the
+perception cluster inside it is the most self-contained and would come out
+first.
 
 ## The pipeline
 
@@ -79,13 +91,13 @@ limits are set on the library, not on a handle, so a second `RobotSession` in
 one process silently overwrites the first one's kinematics. That is why the left
 arm was read-only for months.
 
-`bottle_grasp/arm_worker.py` gives each arm its own process. A worker owns one
+`shelf_dispenser/arm_worker.py` gives each arm its own process. A worker owns one
 `RobotSession` and answers newline-delimited JSON on stdin; the parent holds an
 `ArmProxy` exposing a whitelist of methods. The whitelist is the safety
 boundary, not a convenience — a typo cannot reach a method nobody vetted for the
 second arm.
 
-`moveit_plan_once.py` derives joint and link names from the planning group, so
+`ros/plan_once.py` derives joint and link names from the planning group, so
 the same collision-aware planning path serves `left_arm` and `right_arm`. The
 two base frames are related by a measured transform (`config.yaml`,
 `T_base_right_to_base_left`, 2026-07-14), which lets both arms be fenced in one

@@ -31,11 +31,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.core import DemoParams, SafetyAbort
-from bottle_grasp.demo import BottleDemo
-from bottle_grasp.mobile_body import LiftSocketAdapter
-from bottle_grasp.robot import ArmJointReader
-from bottle_grasp.safety import load_safety_profile
+from shelf_dispenser.core import DemoParams, SafetyAbort
+from shelf_dispenser.orchestrator import RunOrchestrator
+from shelf_dispenser.mobile_body import LiftSocketAdapter
+from shelf_dispenser.arm import ArmJointReader
+from shelf_dispenser.safety import load_safety_profile
 from utils.config import load_config
 
 LIFT_TOLERANCE_MM = 5
@@ -72,7 +72,7 @@ def main() -> int:
     parser.add_argument("--config", default=str(ROOT / "config.yaml"))
     parser.add_argument(
         "--safety-config",
-        default=str(ROOT / "bottle_grasp" / "safety_profiles.json"),
+        default=str(ROOT / "shelf_dispenser" / "safety_profiles.json"),
     )
     parser.add_argument(
         "--output-dir", default=str(ROOT / "outputs" / "grasp_start")
@@ -144,7 +144,7 @@ def main() -> int:
         f"{'OK' if lift_error <= LIFT_TOLERANCE_MM else '需归位'}"
     )
 
-    demo = BottleDemo(
+    demo = RunOrchestrator(
         SimpleNamespace(
             task_mode=None,
             execute=bool(cli.execute),

@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.core import SafetyAbort
-from bottle_grasp.mtc_pick_contract import (
+from shelf_dispenser.core import SafetyAbort
+from shelf_dispenser.mtc_pick_contract import (
     load_place_trajectory,
     validate_place_pre_motion_gate,
     validate_place_release_gate,

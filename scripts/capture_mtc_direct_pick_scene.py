@@ -18,11 +18,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.demo import BottleDemo
-from bottle_grasp import head_lock
-from bottle_grasp.core import SafetyAbort
-from bottle_grasp.run_manifest import write_run_manifest
-from bottle_grasp_site_check import build_args
+from shelf_dispenser.orchestrator import RunOrchestrator
+from shelf_dispenser import head_lock
+from shelf_dispenser.core import SafetyAbort
+from shelf_dispenser.run_manifest import write_run_manifest
+from run_pick_place_task import build_args
 from localization_to_mtc_scenario import build_scenario
 from utils.config import load_config
 
@@ -32,7 +32,7 @@ def main() -> int:
     parser.add_argument("--config", default=str(ROOT / "config.yaml"))
     parser.add_argument(
         "--safety-config",
-        default=str(ROOT / "bottle_grasp" / "safety_profiles.json"),
+        default=str(ROOT / "shelf_dispenser" / "safety_profiles.json"),
     )
     parser.add_argument(
         "--template",
@@ -66,12 +66,12 @@ def main() -> int:
     Path(cli.output_dir).mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO)
     demo_args = build_args(cli)
-    # BottleDemo reads this at construction, so it has to land before the ctor.
+    # RunOrchestrator reads this at construction, so it has to land before the ctor.
     demo_args.target_product = cli.target_product
-    # BottleDemo's plan_only initialization connects both arms for planning.
+    # RunOrchestrator's plan_only initialization connects both arms for planning.
     # This entry only needs fixed-head perception, so keep it camera-only.
     demo_args.plan_only = False
-    demo = BottleDemo(demo_args, load_config(cli.config))
+    demo = RunOrchestrator(demo_args, load_config(cli.config))
     # Coarser cells can merge the target silhouette with nearby background and
     # then conservatively block attach. Keep this refinement direct-pick-only.
     demo.params = replace(

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """On-site, no-arm-motion shelf-panel measurement (robot-side entrypoint).
 
-Companion to `scripts/bottle_grasp_site_check.py`, but leaner: this tool
+Companion to `scripts/run_pick_place_task.py`, but leaner: this tool
 only needs the head RGB-D stream and calibration, so it never creates a
 RobotSession or touches the arm/teleop — unlike site_check, which builds
 the full stack to rehearse planning. Run this once per physical shelf
 layout (or whenever the shelf/robot placement changes) to get a *draft*
-`keepout_boxes` fragment for `bottle_grasp/safety_profiles.json`'s
+`keepout_boxes` fragment for `shelf_dispenser/safety_profiles.json`'s
 `shelf_template`.
 
 This script never writes `safety_profiles.json` itself. Measuring, editing
 the profile, and marking it `verified_for_execution: true` are three
-separate human-reviewed steps on purpose — see `bottle_grasp/SAFETY_PROFILES.md`.
+separate human-reviewed steps on purpose — see `shelf_dispenser/SAFETY_PROFILES.md`.
 
 Typical use: place a bottle (or any small marker) at the picking position
 you care about, note its approximate coordinate in `right_controller_base`
@@ -35,16 +35,16 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.demo import BottleDemo
-from bottle_grasp.shelf_model import FACE_SPECS
-from bottle_grasp.shelf_survey import run_shelf_survey
+from shelf_dispenser.orchestrator import RunOrchestrator
+from shelf_dispenser.shelf_model import FACE_SPECS
+from shelf_dispenser.shelf_survey import run_shelf_survey
 from utils.config import load_config
 
 LOG = logging.getLogger("bottle_demo")
 
 
 def build_args(cli) -> SimpleNamespace:
-    """Just enough for BottleDemo.__init__ + _ensure_head_reference +
+    """Just enough for RunOrchestrator.__init__ + _ensure_head_reference +
     _start_camera("head"). Deliberately does not request a RobotSession —
     this tool has no business touching the arm or teleop."""
     return SimpleNamespace(
@@ -74,7 +74,7 @@ def main() -> int:
     parser.add_argument("--config", default=str(ROOT / "config.yaml"))
     parser.add_argument(
         "--safety-config",
-        default=str(ROOT / "bottle_grasp" / "safety_profiles.json"),
+        default=str(ROOT / "shelf_dispenser" / "safety_profiles.json"),
     )
     parser.add_argument("--safety-profile", default="shelf_template")
     parser.add_argument(
@@ -123,7 +123,7 @@ def main() -> int:
     )
     parser.add_argument("--port", type=int, default=8879)
     parser.add_argument(
-        "--output-dir", default=str(ROOT / "outputs" / "bottle_grasp")
+        "--output-dir", default=str(ROOT / "outputs" / "shelf_dispenser")
     )
     cli = parser.parse_args()
 
@@ -136,7 +136,7 @@ def main() -> int:
 
     Path(cli.output_dir).mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, handlers=[])
-    demo = BottleDemo(build_args(cli), load_config(cli.config))
+    demo = RunOrchestrator(build_args(cli), load_config(cli.config))
 
     try:
         demo._ensure_head_reference()

@@ -3,8 +3,8 @@
 """
 头部舵机位置锁定/校验工具（人工诊断用命令行封装）。
 
-协议与基准值现在统一定义在 `bottle_grasp/head_lock.py`（2026-07-17起，
-`bottle_grasp/demo.py` 每次运行都会在开始前自动调用同一套逻辑强制回到基准
+协议与基准值现在统一定义在 `shelf_dispenser/head_lock.py`（2026-07-17起，
+`shelf_dispenser/demo.py` 每次运行都会在开始前自动调用同一套逻辑强制回到基准
 角度，不再需要人工在标定/demo 之间手动跑这个脚本）。这个命令行工具保留用于
 现场人工诊断："机械臂做了什么之后头部感觉不对，查一下有没有漂移"。
 
@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp import head_lock
+from shelf_dispenser import head_lock
 
 
 def main() -> int:

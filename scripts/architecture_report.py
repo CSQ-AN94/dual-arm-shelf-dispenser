@@ -25,7 +25,7 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "bottle_grasp"
+PACKAGE = ROOT / "shelf_dispenser"
 
 # A single file over this share of the package is flagged.  Not a law -- a
 # prompt to ask what else is living in there.
@@ -99,7 +99,7 @@ def main() -> int:
         for target in targets:
             fan_in[target] += 1
 
-    print(f"bottle_grasp/  {len(modules)} 个模块，{total} 行\n")
+    print(f"shelf_dispenser/  {len(modules)} 个模块，{total} 行\n")
 
     cycles = find_cycles(modules, edges)
     print("① 循环依赖")

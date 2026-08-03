@@ -525,7 +525,7 @@ def test_real_grasp_trace_scenario_stays_explicitly_historical():
 def test_j4_singularity_gate_is_scoped_to_the_cartesian_legs():
     # Elbow-extended is a Jacobian singularity: it breaks CARTESIAN control.
     # Every MTC segment is executed by rm_movej (rm_movel appears nowhere in
-    # bottle_grasp/mtc_execution.py), so the free-space leg inverts no Jacobian
+    # shelf_dispenser/mtc_execution.py), so the free-space leg inverts no Jacobian
     # and may pass through it. Auditing the whole trajectory rejected paths that
     # execute fine, and tied success to whether the arm happened to be parked on
     # the same elbow branch as the reachable pregrasp.
@@ -543,7 +543,7 @@ def test_j4_singularity_gate_is_scoped_to_the_cartesian_legs():
     # The premise the scoping rests on. If a Cartesian primitive ever enters the
     # MTC execution path, the free-space exemption stops being sound.
     execution = (
-        PKG.parents[2] / "bottle_grasp" / "mtc_execution.py"
+        PKG.parents[2] / "shelf_dispenser" / "mtc_execution.py"
     ).read_text(encoding="utf-8")
     assert "movel" not in execution
     assert "execute_planned_joints" in execution
@@ -637,9 +637,9 @@ def test_selected_arm_start_state_has_fresh_joint_state_provenance():
 def test_direct_entry_can_pass_a_target_product_class():
     assert '"--target-product"' in DIRECT_ENTRY
     assert "demo_args.target_product = cli.target_product" in DIRECT_ENTRY
-    # Set before the ctor, which is where BottleDemo reads it.
+    # Set before the ctor, which is where RunOrchestrator reads it.
     assert DIRECT_ENTRY.index("demo_args.target_product") < DIRECT_ENTRY.index(
-        "BottleDemo(demo_args"
+        "RunOrchestrator(demo_args"
     )
     assert "demo._build_head_scene(target, full_frame=True)" in DIRECT_ENTRY
 

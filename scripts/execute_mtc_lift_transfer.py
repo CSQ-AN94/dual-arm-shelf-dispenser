@@ -14,11 +14,11 @@ import threading
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.core import DemoParams, SafetyAbort
-from bottle_grasp.mobile_body import LiftSocketAdapter, WooshChassisAdapter
-from bottle_grasp.mtc_execution import execute_lift_transfer
-from bottle_grasp.robot import ArmJointReader, RobotSession
-from bottle_grasp.safety import load_safety_profile
+from shelf_dispenser.core import DemoParams, SafetyAbort
+from shelf_dispenser.mobile_body import LiftSocketAdapter, WooshChassisAdapter
+from shelf_dispenser.mtc_execution import execute_lift_transfer
+from shelf_dispenser.arm import ArmJointReader, RobotSession
+from shelf_dispenser.safety import load_safety_profile
 from utils.config import load_config
 
 
@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=str(ROOT / "config.yaml"))
     parser.add_argument(
         "--safety-config",
-        default=str(ROOT / "bottle_grasp/safety_profiles.json"),
+        default=str(ROOT / "shelf_dispenser/safety_profiles.json"),
     )
     parser.add_argument("--speed", type=int, default=30)
     parser.add_argument("--record", type=Path)

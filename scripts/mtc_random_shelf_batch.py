@@ -25,15 +25,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from bottle_grasp.core import DemoParams, SafetyAbort
-from bottle_grasp.safety import load_safety_profile
+from shelf_dispenser.core import DemoParams, SafetyAbort
+from shelf_dispenser.safety import load_safety_profile
 from localization_to_mtc_scenario import build_scenario
 
 TEMPLATE = (
     ROOT
     / "mtc_ws/src/grabber_mtc_planner/scenarios/shelf_transfer_fixture.yaml"
 )
-SAFETY_PROFILES = ROOT / "bottle_grasp/safety_profiles.json"
+SAFETY_PROFILES = ROOT / "shelf_dispenser/safety_profiles.json"
 ARMS = ("right_arm", "left_arm")
 BOTTLE_RADIUS_M = 0.033
 BOTTLE_CENTER_X_BAND_M = (-0.25, 0.25)

@@ -20,9 +20,9 @@ from scipy.spatial.transform import Rotation
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.core import DemoParams, SafetyAbort
-from bottle_grasp.grasp_orientation import installed_rmg24_tcp_rotation
-from bottle_grasp.safety import load_safety_profile
+from shelf_dispenser.core import DemoParams, SafetyAbort
+from shelf_dispenser.grasp_orientation import installed_rmg24_tcp_rotation
+from shelf_dispenser.safety import load_safety_profile
 
 # Leading part of the shelf insertion that stays fully collision checked; only
 # the remainder may relax bottle<->hand contact.

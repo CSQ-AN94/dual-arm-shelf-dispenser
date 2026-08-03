@@ -17,7 +17,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.delivery_table import observe_output_table
+from shelf_dispenser.delivery_table import observe_output_table
 DEFAULT_SCENARIO = (
     ROOT
     / "mtc_ws/src/grabber_mtc_planner/scenarios/mujoco_shelf_workflow.yaml"

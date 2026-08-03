@@ -73,7 +73,7 @@ echo "== 同步当前代码到机器人（不删除远端文件） =="
   cd "${SCRIPT_DIR}/.."
   rsync -azR --timeout=30 -e "${RSYNC_SSH}" \
     --exclude='__pycache__/' --exclude='*.pyc' \
-    bottle_grasp/ \
+    shelf_dispenser/ \
     scripts/measure_shelf_geometry.py \
     sensors/camera_thread.py \
     "${ROBOT_HOST}:${REMOTE_DIR}/"

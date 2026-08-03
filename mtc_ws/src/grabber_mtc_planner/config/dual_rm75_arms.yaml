@@ -5,9 +5,9 @@
 # human may later approve real motion (Gate C).
 #
 # Sources for the numbers below:
-#   planning groups / link names : bottle_grasp/ompl_config.py, bottle_grasp/moveit_plan_once.py
-#   touch links                  : bottle_grasp/moveit_scene_helpers.py (tool guard attachment)
-#   TCP transform                : bottle_grasp/core.py -> moveit_link7_to_controller_flange_m (0.0172)
+#   planning groups / link names : shelf_dispenser/ros/ompl_config.py, shelf_dispenser/ros/plan_once.py
+#   touch links                  : shelf_dispenser/ros/scene_helpers.py (tool guard attachment)
+#   TCP transform                : shelf_dispenser/core.py -> moveit_link7_to_controller_flange_m (0.0172)
 #                                  + tcp_z_m (0.151) = 0.1682 m along +Z of link7,
 #                                  represented as a full rigid transform so tool
 #                                  rotation is never discarded.

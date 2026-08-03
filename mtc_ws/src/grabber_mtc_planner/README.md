@@ -201,7 +201,7 @@ python3 scripts/run_mtc_cross_layer_workflow.py \
 ```
 
 It intentionally refuses at the lift step while
-`bottle_grasp/lift_transfer_647_to_250.json` remains `verified: false`.
+`shelf_dispenser/lift_transfer_647_to_250.json` remains `verified: false`.
 That contract needs one supervised physical 647→250 mm clearance run with the
 right arm at the taught carry pose and a recorded safe left-arm pose. The
 program will not infer that missing chassis-clearance measurement from MuJoCo.
@@ -292,7 +292,7 @@ interactive viewer.
 
 `scenarios/shelf_transfer_fixture.yaml` is a **fixture** (`fixture_source: true`):
 the poses are the 2026-07-20 on-site shelf measurement from
-`bottle_grasp/safety_profiles.json` pushed through that profile's verified
+`shelf_dispenser/safety_profiles.json` pushed through that profile's verified
 `T_moveit_from_profile` bridge into `platform_base_link`. It is not live
 perception and must be re-measured before anyone asks for real motion.
 
@@ -307,10 +307,10 @@ transform instead of hand-editing coordinates:
 
 ```bash
 python3 scripts/localization_to_mtc_scenario.py \
-  outputs/bottle_grasp/<run>/右腕精定位_localization.json \
+  outputs/shelf_dispenser/<run>/右腕精定位_localization.json \
   /tmp/localized_mtc.yaml \
   --template mtc_ws/src/grabber_mtc_planner/scenarios/right_arm_placeback_trace.yaml \
-  --safety-profiles bottle_grasp/safety_profiles.json \
+  --safety-profiles shelf_dispenser/safety_profiles.json \
   --profile table_demo
 ```
 
@@ -333,9 +333,9 @@ preserves measured tool rotation when calibration supplies one.
 ```bash
 python3 -m pytest -q \
   mtc_ws/src/grabber_mtc_planner/test/test_plan_only_contract.py \
-  test/bottle_grasp/test_localization_to_mtc_scenario.py \
-  test/bottle_grasp/test_mtc_random_shelf_batch.py \
-  test/bottle_grasp/test_mtc_pick_contract.py
+  test/shelf_dispenser/test_localization_to_mtc_scenario.py \
+  test/shelf_dispenser/test_mtc_random_shelf_batch.py \
+  test/shelf_dispenser/test_mtc_pick_contract.py
 ```
 
 They prove the plan-only contract, the complete-branch semantics and the

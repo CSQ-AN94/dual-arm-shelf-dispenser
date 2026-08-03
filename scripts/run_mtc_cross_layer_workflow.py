@@ -17,7 +17,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.core import SafetyAbort
+from shelf_dispenser.core import SafetyAbort
 
 
 def run(command: list[str], *, timeout: float) -> None:

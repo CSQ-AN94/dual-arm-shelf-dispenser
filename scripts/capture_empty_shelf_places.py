@@ -17,13 +17,13 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp import head_lock
-from bottle_grasp.core import SafetyAbort, pose_matrix
-from bottle_grasp.delivery_table import observe_output_table
-from bottle_grasp.demo import BottleDemo
-from bottle_grasp.mobile_body import LiftSocketAdapter
-from bottle_grasp.safety import load_safety_profile
-from bottle_grasp.scene import (
+from shelf_dispenser import head_lock
+from shelf_dispenser.core import SafetyAbort, pose_matrix
+from shelf_dispenser.delivery_table import observe_output_table
+from shelf_dispenser.orchestrator import RunOrchestrator
+from shelf_dispenser.mobile_body import LiftSocketAdapter
+from shelf_dispenser.safety import load_safety_profile
+from shelf_dispenser.scene import (
     head_scene_points,
     union_scene_voxels,
     voxelize_scene_points,
@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=str(ROOT / "config.yaml"))
     parser.add_argument(
         "--safety-config",
-        default=str(ROOT / "bottle_grasp" / "safety_profiles.json"),
+        default=str(ROOT / "shelf_dispenser" / "safety_profiles.json"),
     )
     parser.add_argument("--expected-lift-mm", type=int, required=True)
     parser.add_argument("--roi-min", type=float, nargs=3, required=True)
@@ -163,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             f"actual={lift.height_mm} mm mode={lift.mode}, "
             f"expected={cli.expected_lift_mm} mm"
         )
-    demo = BottleDemo(_demo_args(cli), load_config(cli.config))
+    demo = RunOrchestrator(_demo_args(cli), load_config(cli.config))
     try:
         demo._start_camera("head")
         angle = head_lock.read_current_angle_direct()

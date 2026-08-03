@@ -18,8 +18,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.core import SafetyAbort, pose_matrix
-from bottle_grasp.safety import FenceBox, load_safety_profile
+from shelf_dispenser.core import SafetyAbort, pose_matrix
+from shelf_dispenser.safety import FenceBox, load_safety_profile
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-yaw-offset-deg", type=float, default=0.0)
     parser.add_argument(
         "--safety-config",
-        default=str(ROOT / "bottle_grasp" / "safety_profiles.json"),
+        default=str(ROOT / "shelf_dispenser" / "safety_profiles.json"),
     )
     cli = parser.parse_args(argv)
 

@@ -16,11 +16,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.core import DemoParams, SafetyAbort
-from bottle_grasp.mobile_body import LiftSocketAdapter
-from bottle_grasp.mtc_execution import validate_hardware_preflight
-from bottle_grasp.robot import ArmJointReader, RobotSession
-from bottle_grasp.safety import load_safety_profile
+from shelf_dispenser.core import DemoParams, SafetyAbort
+from shelf_dispenser.mobile_body import LiftSocketAdapter
+from shelf_dispenser.mtc_execution import validate_hardware_preflight
+from shelf_dispenser.arm import ArmJointReader, RobotSession
+from shelf_dispenser.safety import load_safety_profile
 from utils.config import load_config
 
 
@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=str(ROOT / "config.yaml"))
     parser.add_argument(
         "--safety-config",
-        default=str(ROOT / "bottle_grasp/safety_profiles.json"),
+        default=str(ROOT / "shelf_dispenser/safety_profiles.json"),
     )
     parser.add_argument(
         "--expected-lift-mm",

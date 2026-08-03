@@ -2,7 +2,7 @@
 
 This launch only starts the planner node.  It expects an already-running
 move_group (the PlanningScene and the live joint states come from there); it
-mirrors the parameter loading of bottle_grasp/moveit_headless.py so the planner
+mirrors the parameter loading of shelf_dispenser/ros/headless.py so the planner
 sees exactly the same robot model, kinematics, limits and OMPL settings.
 
 No motion is possible from this launch: the node has no execution path.  The
@@ -24,7 +24,7 @@ import yaml
 
 MOVEIT_CONFIG_PACKAGE = "dual_rm_75b_moveit_config"
 
-# Keep in sync with bottle_grasp/ompl_config.py: the default 0.01 leaves a
+# Keep in sync with shelf_dispenser/ros/ompl_config.py: the default 0.01 leaves a
 # collision-check blind spot that let a planned path cut 1.7 cm into a keepout
 # box on 2026-07-17.
 OMPL_LONGEST_VALID_SEGMENT_FRACTION = 0.0025

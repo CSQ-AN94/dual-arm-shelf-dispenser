@@ -16,7 +16,7 @@ Deliberately absent, so that nothing here can move the robot:
   * no gripper, lift or chassis node;
   * no MTC executable -- run that separately, plan-only.
 
-The one substantive difference from bottle_grasp/moveit_headless.py is the
+The one substantive difference from shelf_dispenser/ros/headless.py is the
 PlanningSceneMonitor's joint_state_topic: that file points move_group at
 /unused_joint_states with wait_for_initial_state_timeout 0.0, i.e. it
 deliberately never learns where the robot is.  Here it subscribes to the real
@@ -37,7 +37,7 @@ import yaml
 
 MOVEIT_CONFIG_PACKAGE = "dual_rm_75b_moveit_config"
 
-# Keep in sync with bottle_grasp/ompl_config.py: the default 0.01 leaves a
+# Keep in sync with shelf_dispenser/ros/ompl_config.py: the default 0.01 leaves a
 # collision-check blind spot that let a planned path cut 1.7 cm into a keepout
 # box on 2026-07-17.
 OMPL_LONGEST_VALID_SEGMENT_FRACTION = 0.0025
@@ -147,7 +147,7 @@ def generate_launch_description():
                         # name: leaving it unset makes TrajectoryExecutionManager
                         # log FATAL and then segfault in get_parameter (verified
                         # 2026-07-27, exit -11).  So it is declared, exactly as
-                        # bottle_grasp/moveit_headless.py declares it, and
+                        # shelf_dispenser/ros/headless.py declares it, and
                         # neutered instead: manage_controllers off, execution
                         # not allowed, and no controller node is ever spawned,
                         # so the action servers this names do not exist.

@@ -26,7 +26,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bottle_grasp.mtc_pick_contract import (
+from shelf_dispenser.mtc_pick_contract import (
     EXPECTED_JOINTS,
     validate_full_transfer_trajectory,
     validate_pick_trajectory,
