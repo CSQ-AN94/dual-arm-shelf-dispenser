@@ -187,6 +187,7 @@ class MoveItPlanner:
         allowed_planning_time_s: float = 6.0,
         num_planning_attempts: int = 12,
         minimum_link7_z: float | None = None,
+        planning_group: str = "right_arm",
     ) -> dict:
         if goal_constraint not in {"pose", "joints"}:
             raise SafetyAbort(
@@ -203,9 +204,14 @@ class MoveItPlanner:
             raise SafetyAbort("MoveIt r_link7 最低高度约束无效")
         request_path = self.run_dir / f"{name}_request.json"
         output_path = self.run_dir / f"{name}_plan.json"
+        if planning_group not in {"right_arm", "left_arm"}:
+            raise SafetyAbort(f"未知规划组: {planning_group!r}")
         request_payload = {
+            "planning_group": planning_group,
             "start_joints_deg": list(map(float, start_joints_deg)),
-            "start_left_joints_deg": (
+            # Named for the arm that is not being planned, whichever that
+            # is; the old key is kept so an unchanged caller still works.
+            "start_other_joints_deg": (
                 None
                 if start_left_joints_deg is None
                 else list(map(float, start_left_joints_deg))

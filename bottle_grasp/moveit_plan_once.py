@@ -94,8 +94,28 @@ def pose_to_rotation_translation(pose):
     return rotation, translation
 
 
-def compute_link7_fk(node, client, state, planning_frame):
-    """Return the r_link7 pose expressed in planning_frame.
+def arm_names(group):
+    """Joint/link names for a planning group, plus the passive arm's prefix.
+
+    Both arms hang off one URDF, so a plan for either has to name its own
+    seven joints and carry the other arm's as static scene.  Deriving both
+    from the group name is what lets the left arm reuse this whole file.
+    """
+    if group not in ("right_arm", "left_arm"):
+        raise RuntimeError(f"unsupported planning group: {group!r}")
+    prefix = "r" if group == "right_arm" else "l"
+    other = "l" if prefix == "r" else "r"
+    return {
+        "prefix": prefix,
+        "other_prefix": other,
+        "ik_link": f"{prefix}_link7",
+        "joints": [f"{prefix}_joint{i}" for i in range(1, 8)],
+        "other_joints": [f"{other}_joint{i}" for i in range(1, 8)],
+    }
+
+
+def compute_link7_fk(node, client, state, planning_frame, ik_link="r_link7"):
+    """Return the planning arm's link7 pose expressed in planning_frame.
 
     /compute_fk 只有在 frame_id 为模型根坐标系时才不查 TF。headless 启动没
     有任何 /joint_states 发布者，platform_joint（prismatic，body_base_link
@@ -106,7 +126,7 @@ def compute_link7_fk(node, client, state, planning_frame):
     """
     request = GetPositionFK.Request()
     request.header.frame_id = ""  # 空 frame_id = 模型根坐标系，不触发 TF
-    request.fk_link_names = ["r_link7", planning_frame]
+    request.fk_link_names = [ik_link, planning_frame]
     request.robot_state = state
     future = client.call_async(request)
     rclpy.spin_until_future_complete(node, future, timeout_sec=10)
@@ -116,7 +136,7 @@ def compute_link7_fk(node, client, state, planning_frame):
         raise RuntimeError(f"compute_fk failed: {code}")
     poses = dict(zip(response.fk_link_names, response.pose_stamped))
     missing = [
-        name for name in ("r_link7", planning_frame) if name not in poses
+        name for name in (ik_link, planning_frame) if name not in poses
     ]
     if missing:
         raise RuntimeError(f"compute_fk missing link poses: {missing}")
@@ -124,7 +144,7 @@ def compute_link7_fk(node, client, state, planning_frame):
         poses[planning_frame].pose
     )
     link_rotation, link_translation = pose_to_rotation_translation(
-        poses["r_link7"].pose
+        poses[ik_link].pose
     )
     # T_rel = inv(T_frame) @ T_link7；刚体逆直接用旋转转置
     relative_rotation = [
@@ -196,7 +216,12 @@ def main():
 
         request = GetMotionPlan.Request()
         motion = request.motion_plan_request
-        motion.group_name = "right_arm"
+        # Defaulted, not required: every existing caller plans the right arm
+        # and none of them send this field.
+        group = str(data.get("planning_group", "right_arm"))
+        names = arm_names(group)
+        ik_link = names["ik_link"]
+        motion.group_name = group
         planner_id = str(data["planner_id"])
         allowed_planning_time = float(data["allowed_planning_time_s"])
         num_planning_attempts = int(data["num_planning_attempts"])
@@ -237,7 +262,7 @@ def main():
                 raise RuntimeError("minimum_link7_z is outside workspace")
             path_position = PositionConstraint()
             path_position.header.frame_id = planning_frame
-            path_position.link_name = "r_link7"
+            path_position.link_name = ik_link
             path_box = SolidPrimitive()
             path_box.type = SolidPrimitive.BOX
             path_box.dimensions = [
@@ -260,26 +285,27 @@ def main():
         # 没有碰撞体积——2026-07-16实测规划出TCP距桌面2.7cm的擦桌路径。
         state.is_diff = True
         state.joint_state = JointState()
-        right_names = [f"r_joint{i}" for i in range(1, 8)]
-        right_positions = [
+        plan_names = names["joints"]
+        plan_positions = [
             math.radians(value) for value in data["start_joints_deg"]
         ]
-        left_values = data.get("start_left_joints_deg")
-        if left_values is None:
-            state.joint_state.name = right_names
-            state.joint_state.position = right_positions
+        # ``start_left_joints_deg`` is the historical name for "the arm that is
+        # not being planned", from when that was always the left one.
+        other_values = data.get("start_other_joints_deg") or data.get(
+            "start_left_joints_deg"
+        )
+        if other_values is None:
+            state.joint_state.name = plan_names
+            state.joint_state.position = plan_positions
         else:
-            state.joint_state.name = [
-                *[f"l_joint{i}" for i in range(1, 8)],
-                *right_names,
-            ]
+            state.joint_state.name = [*names["other_joints"], *plan_names]
             state.joint_state.position = [
-                *[math.radians(value) for value in left_values],
-                *right_positions,
+                *[math.radians(value) for value in other_values],
+                *plan_positions,
             ]
         motion.start_state = state
         start_link7_fk = compute_link7_fk(
-            node, fk_client, state, planning_frame
+            node, fk_client, state, planning_frame, ik_link
         )
 
         # There is deliberately no legacy default.  A missing field used to
@@ -300,17 +326,23 @@ def main():
         goal_state.joint_state.position = list(state.joint_state.position)
         goal_joints = data.get("goal_joints_deg")
         if goal_joints is not None:
-            right_goal = [math.radians(value) for value in goal_joints]
-            if data.get("start_left_joints_deg") is None:
-                goal_state.joint_state.position = right_goal
-            else:
-                goal_state.joint_state.position = [
-                    *goal_state.joint_state.position[:7],
-                    *right_goal,
-                ]
+            # Substitute by joint name, not by slice: which half of the state
+            # belongs to the planning arm depends on which arm it is.
+            goal_by_name = dict(
+                zip(
+                    goal_state.joint_state.name,
+                    goal_state.joint_state.position,
+                )
+            )
+            goal_by_name.update(
+                zip(plan_names, (math.radians(v) for v in goal_joints))
+            )
+            goal_state.joint_state.position = [
+                float(goal_by_name[name]) for name in goal_state.joint_state.name
+            ]
         validity_request = GetStateValidity.Request()
         validity_request.robot_state = goal_state
-        validity_request.group_name = "right_arm"
+        validity_request.group_name = group
         validity_future = validity_client.call_async(validity_request)
         rclpy.spin_until_future_complete(
             node, validity_future, timeout_sec=10
@@ -326,14 +358,14 @@ def main():
             ]
         )
         goal_candidate_link7_fk = compute_link7_fk(
-            node, fk_client, goal_state, planning_frame
+            node, fk_client, goal_state, planning_frame, ik_link
         )
 
         constraint = Constraints()
         if goal_constraint == "joints":
             if goal_joints is None:
                 raise RuntimeError("joint goal requested without goal_joints_deg")
-            for name, value in zip(right_names, goal_joints):
+            for name, value in zip(plan_names, goal_joints):
                 joint_constraint = JointConstraint()
                 joint_constraint.joint_name = name
                 joint_constraint.position = math.radians(value)
@@ -348,7 +380,7 @@ def main():
             quaternion = quaternion_from_matrix(rotation)
             position_constraint = PositionConstraint()
             position_constraint.header.frame_id = planning_frame
-            position_constraint.link_name = "r_link7"
+            position_constraint.link_name = ik_link
             box = SolidPrimitive()
             box.type = SolidPrimitive.BOX
             box.dimensions = [0.008, 0.008, 0.008]
@@ -364,7 +396,7 @@ def main():
             position_constraint.weight = 1.0
             orientation_constraint = OrientationConstraint()
             orientation_constraint.header.frame_id = planning_frame
-            orientation_constraint.link_name = "r_link7"
+            orientation_constraint.link_name = ik_link
             (
                 orientation_constraint.orientation.x,
                 orientation_constraint.orientation.y,
@@ -395,9 +427,9 @@ def main():
                 list(trajectory.points[-1].positions),
             )
             endpoint_link7_fk = compute_link7_fk(
-                node, fk_client, endpoint_state, planning_frame
+                node, fk_client, endpoint_state, planning_frame, ik_link
             )
-        expected_joint_names = [f"r_joint{i}" for i in range(1, 8)]
+        expected_joint_names = list(plan_names)
         actual_joint_names = list(trajectory.joint_names)
         points_deg = []
         output_joint_names = actual_joint_names
@@ -408,7 +440,7 @@ def main():
                 or set(actual_joint_names) != set(expected_joint_names)
             ):
                 raise RuntimeError(
-                    "right_arm trajectory joint contract violated: "
+                    f"{group} trajectory joint contract violated: "
                     f"{actual_joint_names!r}"
                 )
             source_index = {
