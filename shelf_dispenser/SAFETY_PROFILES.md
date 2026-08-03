@@ -95,7 +95,7 @@ When a good route has already been demonstrated by teleoperation, record the
 whole route instead of guessing a new global path:
 
 ```bash
-python scripts/record_right_arm_guided_path.py
+python （该脚本已随 Grabber 留在原库，本库不提供）
 ```
 
 The recorder is read-only. The sampled joint/TCP path can be checked against

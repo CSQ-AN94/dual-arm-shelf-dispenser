@@ -11,7 +11,7 @@ set -euo pipefail
 #                     the same grasp/place tail -> return to configured home
 
 ROBOT_HOST="${ROBOT_HOST:-rm@192.168.3.68}"
-REMOTE_DIR="${REMOTE_DIR:-/home/rm/Grabber}"
+REMOTE_DIR="${REMOTE_DIR:-/home/rm/dual-arm-shelf-dispenser}"
 REMOTE_PY="${REMOTE_PY:-/home/rm/miniconda3/envs/tube_vision/bin/python}"
 SAFETY_PROFILE="${SAFETY_PROFILE:-table_demo}"
 PORT="${PORT:-8879}"
@@ -274,7 +274,6 @@ echo "== 同步当前 bottle task 代码到机器人（不删除远端文件） 
     --exclude='__pycache__/' --exclude='*.pyc' \
     shelf_dispenser/ \
     scripts/run_pick_place_task.py \
-    scripts/woosh_rotate_relative.cpp \
     scripts/run_task_autonomous.sh \
     scripts/run_task_resume.sh \
     scripts/start_task.sh \

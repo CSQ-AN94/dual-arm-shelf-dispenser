@@ -16,15 +16,23 @@
 #   python scripts/robot_code_drift.py --push
 
 set -u
-source /opt/ros/humble/setup.bash
-source /home/rm/ros2_ws/install/setup.bash
 
 G=${SHELF_ROOT:-/home/rm/dual-arm-shelf-dispenser}
 PY=${SHELF_PYTHON:-/home/rm/miniconda3/envs/tube_vision/bin/python3}
 O=${CYCLE_OUT:-/home/rm/cycle}
 SPEED=${CYCLE_SPEED:-100}
 
-rm -rf "$O"; mkdir -p "$O"
+# $O gets wiped, so only ever wipe a directory this script created.  Comparing
+# against $HOME or the repo path is not enough -- it depends on who is running
+# where, and CYCLE_OUT=/home/rm would have deleted the robot's home.
+MARKER="$O/.cycle_output"
+[ "${O#/}" = "$O" ] && { echo "拒绝: CYCLE_OUT 必须是绝对路径" >&2; exit 1; }
+if [ -e "$O" ] && [ ! -f "$MARKER" ]; then
+  echo "拒绝: $O 已存在且不是本脚本建的输出目录（缺 .cycle_output 标记）" >&2
+  echo "      要复用它，先自己清空；要换目录，设 CYCLE_OUT。" >&2
+  exit 1
+fi
+rm -rf "$O"; mkdir -p "$O"; touch "$MARKER"
 say(){ echo; echo "########## $* ##########"; }
 fail(){ echo "  失败: $(grep -E '拒绝|SafetyAbort' "$1" | tail -1)"; tail -4 "$1"; echo CYCLE_DONE; exit 1; }
 

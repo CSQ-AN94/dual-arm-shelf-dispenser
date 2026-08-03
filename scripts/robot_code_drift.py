@@ -32,12 +32,12 @@ DEFAULT_REMOTE = "/home/rm/dual-arm-shelf-dispenser"
 # people learn to ignore.
 TRACKED = [
     "shelf_dispenser/core.py",
-    "shelf_dispenser/demo.py",
+    "shelf_dispenser/orchestrator.py",
     "shelf_dispenser/grasp_orientation.py",
     "shelf_dispenser/mtc_execution.py",
     "shelf_dispenser/mtc_pick_contract.py",
     "shelf_dispenser/planner.py",
-    "shelf_dispenser/robot.py",
+    "shelf_dispenser/arm.py",
     "shelf_dispenser/safe_planner.py",
     "shelf_dispenser/safety.py",
     "shelf_dispenser/safety_profiles.json",

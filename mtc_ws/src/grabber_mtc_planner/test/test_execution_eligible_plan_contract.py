@@ -11,7 +11,7 @@ REPO = pathlib.Path(__file__).resolve().parents[4]
 PLANNER = (PKG / "src/plan_shelf_transfer.cpp").read_text(
     encoding="utf-8"
 )
-EXECUTOR = (REPO / "shelf_dispenser/robot.py").read_text(encoding="utf-8")
+EXECUTOR = (REPO / "shelf_dispenser/arm.py").read_text(encoding="utf-8")
 
 
 def test_mtc_applies_the_real_controller_contract_before_selecting_a_solution():

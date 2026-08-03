@@ -1,6 +1,6 @@
 """Stateless scene-cleanup id ownership; no ROS required."""
 
-from shelf_dispenser.scene_ids import RGBD_VOXELS_ID, managed_scene_ids
+from shelf_dispenser.ros.scene_ids import RGBD_VOXELS_ID, managed_scene_ids
 
 
 def test_owned_prefixes_are_selected_for_removal():

@@ -38,7 +38,8 @@ shelf_dispenser/       the library
     ros/               entry points run by the system Python, by path
 mtc_ws/                ROS 2 workspace, MoveIt Task Constructor planner (C++)
 scripts/               one entry point per pipeline stage
-test/                  543 tests, no hardware needed
+test/                  the suite; run `pytest -q` from the repo root,
+                       which includes mtc_ws's source-contract tests
 ```
 
 Names describe what is behind the interface, not where the code came from.

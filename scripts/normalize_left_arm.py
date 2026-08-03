@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
-"""Put the left arm on its taught pose, through the same safety chain as the right.
+"""Report the left arm against its taught pose.  Motion is not open yet.
 
-The left arm has been driven before, by hand and by one-off scripts.  What it
-has never had is the chain the right arm gets: a collision-aware MoveIt plan
-against the live scene, a dense re-check of every trajectory point against the
-electronic fence, and a joint-limit margin measured from the arm's own starting
-excess.  Moving it by hand is how it ended up at a pose nobody taught, which is
-how the profile ended up recording one.
+The plumbing that kept the left arm unreachable is done and tested:
 
-Two things made that chain unreachable for the left arm, and both are fixed:
+  * ``arm_worker.ArmProxy`` gives it its own process, so the RealMan SDK's
+    process-global ``Algo`` cannot have the two arms overwrite each other.
+  * ``ros/plan_once.py`` derives group, link and joint names from the planning
+    group, so the collision-aware path serves ``left_arm``.
+  * ``left_arm.LeftArmFence`` states the right arm's fence for a left-arm pose
+    exactly, by converting the point rather than rewriting the boxes.
 
-  * The RealMan SDK's Algo is process-global, so a second RobotSession in this
-    process would overwrite the right arm's kinematics.  ArmProxy gives the left
-    arm its own process (shelf_dispenser/arm_worker.py).
-  * Every fence box is expressed in the right arm's base frame, 120 mm from the
-    left arm's own.  left_view moves the fence over once, using the measured
-    dual-arm transform from config.yaml (shelf_dispenser/left_arm.py).
+What is not done is the safety model, and it is not close enough to fudge:
 
-Defaults to a dry run.  Nothing moves without --execute.
+  * The left tool has never been measured.  ``open_left_arm`` refuses to borrow
+    the right arm's record because that record says, in its own evidence_id,
+    not to: it is nominal, with its residual absorbed by a stop-short distance
+    tuned on the right arm against a real shelf.
+  * ``SafeMotionPlanner`` reads the fence through its own profile, so it needs
+    a point-conversion hook before ``LeftArmFence`` can sit inside the dense
+    re-check.  Handing it a rewritten profile instead is the bug
+    ``LeftArmFence`` exists to undo -- bounding a rotated box grows it, and a
+    grown *allowed* zone hands out space the fence never granted.
 
-    python scripts/normalize_left_arm.py               # 只报告
-    python scripts/normalize_left_arm.py --execute     # 真运动
+So this reports and stops.  A left arm moving under a fence nobody has verified
+is worse than a left arm that does not move.
+
+    python scripts/normalize_left_arm.py
 """
 
 from __future__ import annotations
@@ -28,23 +33,25 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-import threading
 from pathlib import Path
-
-import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from shelf_dispenser.core import DemoParams, SafetyAbort
-from shelf_dispenser.left_arm import arrival_error_deg, left_view, open_left_arm
-from shelf_dispenser.planner import MoveItPlanner
+from shelf_dispenser.left_arm import LeftArmFence, arrival_error_deg
 from shelf_dispenser.arm import ArmJointReader
-from shelf_dispenser.safe_planner import PlanTarget, SafeMotionPlanner
 from shelf_dispenser.safety import load_safety_profile
 from utils.config import load_config
 
 LOG = logging.getLogger("normalize_left_arm")
+
+BLOCKED = (
+    "左臂执行入口未开放：\n"
+    "  (1) 左臂工具链未实测——右臂那份 evidence_id 明确写着不得迁移；\n"
+    "  (2) SafeMotionPlanner 尚未接入 LeftArmFence 的逐点折算。\n"
+    "底层通路（独立进程、left_arm 规划组、精确围栏）已就绪并有测试覆盖。"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,13 +62,15 @@ def main(argv: list[str] | None = None) -> int:
         default=str(ROOT / "shelf_dispenser" / "safety_profiles.json"),
     )
     parser.add_argument(
-        "--output-dir", default=str(ROOT / "outputs" / "left_arm_normalize")
+        "--execute",
+        action="store_true",
+        help="Refused for now; see the module docstring for the two blockers",
     )
-    parser.add_argument("--execute", action="store_true")
     cli = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO)
-    run_dir = Path(cli.output_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
+
+    if cli.execute:
+        raise SafetyAbort(BLOCKED)
 
     cfg = load_config(cli.config)
     params = DemoParams()
@@ -72,71 +81,23 @@ def main(argv: list[str] | None = None) -> int:
     if not target:
         raise SafetyAbort("shelf_template 未配置 grasp_start_left_joints_deg")
 
-    left_profile = left_view(
-        profile, cfg.calibration.T_base_right_to_base_left
-    )
-    LOG.info(
-        "左臂围栏已折算：工作区 x [%.3f, %.3f]",
-        left_profile.tcp_workspace.minimum[0],
-        left_profile.tcp_workspace.maximum[0],
-    )
+    # Constructed so a broken dual-arm transform is caught here rather than the
+    # first time someone opens the motion path.
+    LeftArmFence(profile, cfg.calibration.T_base_right_to_base_left)
 
-    left = open_left_arm(cfg, params, profile, take_control=cli.execute)
-    right = ArmJointReader(cfg.connections.right_arm_ip, cfg.connections.arm_port)
+    reader = ArmJointReader(cfg.connections.left_arm_ip, cfg.connections.arm_port)
     try:
-        current = list(left.joints_deg())
-        error = arrival_error_deg(current, target)
-        print(f"左臂 最大关节偏差 {error:7.2f}°")
-        print(f"     当前 {' '.join(f'{v:7.1f}' for v in current)}")
-        print(f"     目标 {' '.join(f'{v:7.1f}' for v in target)}")
-        if error <= params.planned_start_tolerance_deg:
-            print("\n已在示教位姿，无需移动。")
-            return 0
-        if not cli.execute:
-            print("\n干跑：未下发任何运动。加 --execute 才会移动左臂。")
-            return 0
-
-        planner = SafeMotionPlanner(
-            moveit=MoveItPlanner(project_root=ROOT, run_dir=run_dir),
-            robot=left,
-            left_robot=right,  # the other arm, captured live as collision scene
-            safety=left_profile,
-            params=params,
-            report=lambda name, message: LOG.info("%s: %s", name, message),
-            planning_group="left_arm",
-        )
-        verified = planner.plan(
-            name="normalize_left_arm",
-            targets=[
-                PlanTarget(
-                    label="示教左臂位姿",
-                    flange=np.asarray(
-                        left.controller_flange_from_joints(list(target)),
-                        dtype=float,
-                    ),
-                    goal_joints=tuple(map(float, target)),
-                    goal_constraint="joints",
-                )
-            ],
-            obstacle_points=[],
-            collision_boxes=[],
-        )
-        points = [
-            list(map(float, point)) for point in verified.trajectory["points_deg"]
-        ]
-        left.validate_planned_joints(points, measured_start=current)
-        left.execute_planned_joints(points)
-        reached = list(left.joints_deg())
-        error = arrival_error_deg(reached, target)
-        print(f"\n已到达示教左臂位姿，偏差 {error:.2f}°。")
-        if error > params.planned_start_tolerance_deg:
-            raise SafetyAbort(
-                f"左臂到位偏差 {error:.2f}° 超过 "
-                f"{params.planned_start_tolerance_deg:.2f}°"
-            )
+        current = list(reader.joints_deg())
     finally:
-        right.close()
-        left.close()
+        reader.close()
+    error = arrival_error_deg(current, target)
+    print(f"左臂 最大关节偏差 {error:7.2f}°")
+    print(f"     当前 {' '.join(f'{v:7.1f}' for v in current)}")
+    print(f"     目标 {' '.join(f'{v:7.1f}' for v in target)}")
+    if error <= params.planned_start_tolerance_deg:
+        print("\n已在示教位姿。")
+    else:
+        print(f"\n偏离示教位姿 {error:.2f}°，目前只能手动摆回。\n{BLOCKED}")
     return 0
 
 

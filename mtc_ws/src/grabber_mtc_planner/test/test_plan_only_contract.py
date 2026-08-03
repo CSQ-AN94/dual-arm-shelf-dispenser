@@ -354,7 +354,7 @@ def test_empty_shelf_entry_is_head_only_fresh_and_keeps_non_target_voxels():
     assert 'payload["held_tcp_base_xyz_rpy_rad"]' in PLACE_CONVERTER
     assert "--held-tcp-base-rad" not in PLACE_CONVERTER
     assert "RobotSession" not in PLACE_CAPTURE
-    assert "age_s > 45.0" in PLACE_CONVERTER
+    assert "age_s < 0.0 or age_s > " in PLACE_CONVERTER
     assert '"fixture_source": False' in PLACE_CONVERTER
     # A map is taken either with the arm holding a bottle -- which leaves an
     # occlusion shadow the arm subtraction cannot recover -- or before the
@@ -391,9 +391,8 @@ def test_cross_layer_runner_uses_live_state_then_pick_lift_empty_place():
     assert '"--execute", action="store_true", required=True' in CROSS_LAYER_RUNNER
     assert "operator-confirms-lower-shelf-obstacles-complete" in CROSS_LAYER_RUNNER
     assert '"--allow-sdk-retiming"' in CROSS_LAYER_RUNNER
-    assert CROSS_LAYER_RUNNER.index(
-        "load_lift_transfer_contract(cli.lift_contract)"
-    ) < CROSS_LAYER_RUNNER.index("subprocess.Popen(")
+    assert "--lift-target-mm" in CROSS_LAYER_RUNNER
+    assert "load_lift_transfer_contract" not in CROSS_LAYER_RUNNER
 
 
 def test_direct_entry_uses_fixed_head_without_observation_or_wrist_lock():

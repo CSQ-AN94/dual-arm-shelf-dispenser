@@ -14,7 +14,7 @@ from typing import Sequence
 import numpy as np
 
 from .core import SafetyAbort
-from .scene_ids import RGBD_VOXELS_ID
+from .ros.scene_ids import RGBD_VOXELS_ID
 
 LOG = logging.getLogger("bottle_demo")
 
@@ -110,9 +110,16 @@ class MoveItPlanner:
             raise SafetyAbort(f"{operation} 结果无法解析: {exc}") from exc
 
     @staticmethod
-    def _normalize_right_arm_trajectory(plan: dict) -> None:
-        """Interpret trajectory columns by name, never by message order."""
-        expected = [f"r_joint{i}" for i in range(1, 8)]
+    def _normalize_planned_arm_trajectory(
+        plan: dict, planning_group: str = "right_arm"
+    ) -> None:
+        """Interpret trajectory columns by name, never by message order.
+
+        The names belong to whichever arm was planned; hardcoding the right
+        arm's rejected every valid left-arm trajectory.
+        """
+        prefix = "r" if planning_group == "right_arm" else "l"
+        expected = [f"{prefix}_joint{i}" for i in range(1, 8)]
         names = list(plan.get("joint_names") or [])
         if (
             len(names) != len(expected)
@@ -267,7 +274,7 @@ class MoveItPlanner:
                 f"goal_constraint={plan.get('goal_constraint', goal_constraint)}"
                 f"{detail}"
             )
-        self._normalize_right_arm_trajectory(plan)
+        self._normalize_planned_arm_trajectory(plan, planning_group)
         required_fk = ("start_link7_fk", "endpoint_link7_fk")
         missing_fk = [name for name in required_fk if not plan.get(name)]
         if missing_fk:
