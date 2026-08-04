@@ -1,4 +1,4 @@
-"""The left arm's fence must mean the same physical place as the right's."""
+"""The left arm's measured model has to hold, in both directions."""
 
 from dataclasses import replace
 from pathlib import Path
@@ -8,105 +8,91 @@ import numpy as np
 import pytest
 
 from shelf_dispenser.core import SafetyAbort
-from shelf_dispenser.left_arm import arrival_error_deg, left_view, open_left_arm
+from shelf_dispenser.left_arm import (
+    arrival_error_deg,
+    left_joint_signs,
+    left_view,
+    open_left_arm,
+)
 from shelf_dispenser.safety import load_safety_profile
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILES = ROOT / "shelf_dispenser" / "safety_profiles.json"
-
-# The measured dual-arm transform from config.yaml, 2026-07-14.
-BASE_RIGHT_TO_BASE_LEFT = np.array(
-    [
-        [0.999691058769, 0.016811128493, 0.018307730006, -0.119987534677],
-        [-0.016767487109, 0.999856203057, -0.002534676056, 0.007718909353],
-        [-0.018347708175, 0.002226918364, 0.999829186631, 0.014391259738],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
-)
 
 
 def _profile():
     return load_safety_profile(PROFILES, "shelf_template", require_verified=False)
 
 
-def test_the_verdict_is_identical_to_the_right_arm_fence_everywhere():
-    """Regression: bounding a rotated box grew the allowed zones.
+def test_the_measured_model_is_present_and_closed():
+    """0.583 mm / 0.108 deg over 16 states -- the first real metrology here."""
+    model = _profile().left_arm_model
+    assert model is not None
+    assert model["joint_signs"] == [1, -1, 1, -1, 1, -1, 1]
+    assert model["samples"] >= 12
+    assert model["max_position_residual_m"] < 0.003
+    assert model["max_orientation_residual_deg"] < 0.5
 
-    The earlier version rewrote each box into the left base frame and took the
-    axis-aligned hull, which is larger than the box it came from.  For an
-    allowed zone that hands out space the fence never granted -- a point could
-    pass the left-framed check while being outside every real zone.  Converting
-    the point instead is exact, so the two verdicts must agree on every sample,
-    including ones deliberately placed either side of a zone edge.
-    """
+
+def test_left_view_swaps_the_bridge_and_the_tool_record():
     profile = _profile()
-    left = left_view(profile, BASE_RIGHT_TO_BASE_LEFT)
-    rotation = BASE_RIGHT_TO_BASE_LEFT[:3, :3]
-    translation = BASE_RIGHT_TO_BASE_LEFT[:3, 3]
+    left = left_view(profile)
 
-    def verdict(view, point) -> bool:
-        # The same code path for both, so this compares frames rather than two
-        # people's idea of what the fence rule is.
-        try:
-            view.assert_tcp_point(point, label="点")
-        except SafetyAbort:
-            return False
-        return True
-
-    rng = np.random.default_rng(0)
-    lower = np.asarray(profile.tcp_workspace.minimum) - 0.1
-    upper = np.asarray(profile.tcp_workspace.maximum) + 0.1
-    samples = [lower + rng.random(3) * (upper - lower) for _ in range(1000)]
-    for zone in profile.allowed_tcp_zones:
-        for corner in (zone.minimum, zone.maximum):
-            samples.append(np.asarray(corner) + 1e-4)
-            samples.append(np.asarray(corner) - 1e-4)
-
-    disagreements = 0
-    for in_right in samples:
-        in_left = rotation.T @ (np.asarray(in_right) - translation)
-        if verdict(left, in_left) != verdict(profile, in_right):
-            disagreements += 1
-    assert disagreements == 0, f"{disagreements}/{len(samples)} 个点两边判定不一致"
-
-
-def test_the_point_conversion_round_trips():
-    left = left_view(_profile(), BASE_RIGHT_TO_BASE_LEFT)
-    rotation = BASE_RIGHT_TO_BASE_LEFT[:3, :3]
-    translation = BASE_RIGHT_TO_BASE_LEFT[:3, 3]
-    point = np.array([0.163, 0.396, -0.180])
-    in_left = rotation.T @ (point - translation)
-    assert left.in_fence_frame(in_left) == pytest.approx(point)
-    # The right-arm view must be untouched by the left one existing.
+    assert left.name.endswith("__left")
+    # Planning must go through the left arm's own bridge, not the right one's.
+    assert not np.allclose(left.T_moveit_from_profile, profile.T_moveit_from_profile)
+    assert np.allclose(
+        left.T_moveit_from_profile,
+        np.asarray(profile.left_arm_model["T_moveit_from_left_profile"]),
+    )
+    # And through the left tool record, which carries the tool-side constant.
+    assert left.tool_mount_calibration is profile.left_tool_mount_calibration
+    assert left.tool_mount_calibration.grasping_allowed is False
+    # The right-arm view is untouched.
     assert _profile().tcp_frame_transform is None
 
 
-def test_a_transform_that_is_not_a_rigid_motion_is_refused():
+def test_the_fence_conversion_is_consistent_with_both_bridges():
+    """Derived from the two measured bridges, not from the suspect config one.
+
+    config.yaml's dual-arm transform came from two head-camera eye-to-hand
+    rounds and does not describe the controller base frames -- using it is what
+    produced the 179.9 deg surprise.
+    """
     profile = _profile()
-    with pytest.raises(SafetyAbort, match="4x4"):
-        left_view(profile, np.eye(3))
-    skewed = np.eye(4)
-    skewed[0, 0] = 2.0
-    with pytest.raises(SafetyAbort, match="正交"):
-        left_view(profile, skewed)
+    left = left_view(profile)
+    right_bridge = np.asarray(profile.T_moveit_from_profile, dtype=float)
+    left_bridge = np.asarray(
+        profile.left_arm_model["T_moveit_from_left_profile"], dtype=float
+    )
+    # A point in the left base frame, taken to MoveIt two ways, must land twice.
+    point = np.array([0.12, -0.30, 0.44, 1.0])
+    via_conversion = right_bridge @ np.append(
+        left.in_fence_frame(point[:3]), 1.0
+    )
+    via_left_bridge = left_bridge @ point
+    assert via_conversion == pytest.approx(via_left_bridge, abs=1e-9)
 
 
-def test_malformed_points_are_refused():
-    left = left_view(_profile(), BASE_RIGHT_TO_BASE_LEFT)
-    for bad in ([0.0, 0.0], [float("nan"), 0.0, 0.0]):
-        with pytest.raises(SafetyAbort, match="TCP 坐标无效"):
-            left.assert_tcp_point(bad, label="坏点")
+def test_joint_signs_are_validated_not_trusted():
+    profile = _profile()
+    assert left_joint_signs(profile) == (1, -1, 1, -1, 1, -1, 1)
+
+    broken = replace(profile, left_arm_model={"joint_signs": [1, -1, 1]})
+    with pytest.raises(SafetyAbort, match="7 个"):
+        left_joint_signs(broken)
+    missing = replace(profile, left_arm_model=None)
+    with pytest.raises(SafetyAbort, match="left_arm_model"):
+        left_joint_signs(missing)
+    with pytest.raises(SafetyAbort, match="left_arm_model"):
+        left_view(missing)
 
 
-def test_the_left_arm_uses_its_own_record_and_refuses_without_one():
-    """The right record's evidence_id forbids the transfer; honour that."""
+def test_the_left_arm_needs_its_own_tool_record():
     profile = _profile()
     assert "do not transfer to the left arm" in (
         profile.tool_mount_calibration.evidence_id
     )
-    assert profile.left_tool_mount_calibration is not None
-
-    # With the left record removed, the entry must refuse rather than fall back.
     stripped = replace(profile, left_tool_mount_calibration=None)
     with pytest.raises(SafetyAbort, match="左臂工具标定"):
         open_left_arm(

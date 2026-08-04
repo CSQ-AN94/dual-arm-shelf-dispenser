@@ -45,7 +45,7 @@ from shelf_dispenser.arm import ArmJointReader
 from shelf_dispenser.core import DemoParams, SafetyAbort
 from shelf_dispenser.left_arm import (
     arrival_error_deg,
-    assert_left_bridge_measured,
+    left_joint_signs,
     left_view,
     open_left_arm,
 )
@@ -68,6 +68,17 @@ def main(argv: list[str] | None = None) -> int:
         "--output-dir", default=str(ROOT / "outputs" / "left_arm_normalize")
     )
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument(
+        "--target-joints",
+        type=float,
+        nargs=7,
+        help=(
+            "Plan to these seven degrees instead of the profile's taught pose. "
+            "The taught one has never been through a planner, and the model "
+            "reports it in collision with body_base_link; this is how a "
+            "replacement gets tried before it is taught."
+        ),
+    )
     cli = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO)
     run_dir = Path(cli.output_dir)
@@ -78,17 +89,16 @@ def main(argv: list[str] | None = None) -> int:
     profile = load_safety_profile(
         cli.safety_config, "shelf_template", require_verified=True
     )
-    target = profile.grasp_start_left_joints_deg
+    target = cli.target_joints or profile.grasp_start_left_joints_deg
     if not target:
         raise SafetyAbort("shelf_template 未配置 grasp_start_left_joints_deg")
+    if cli.target_joints:
+        LOG.info("使用命令行指定的目标，不是 profile 里的示教位姿")
 
     # Built before anything opens, so a broken dual-arm transform surfaces here
     # rather than midway through a motion.
-    left_profile = left_view(profile, cfg.calibration.T_base_right_to_base_left)
-    if cli.execute:
-        # Fails before the arm is opened and teleop is disturbed, rather than
-        # after a plan has already been computed.
-        assert_left_bridge_measured(profile)
+    left_profile = left_view(profile)
+    signs = left_joint_signs(profile)
 
     left = open_left_arm(cfg, params, profile, take_control=cli.execute)
     right = ArmJointReader(cfg.connections.right_arm_ip, cfg.connections.arm_port)
@@ -120,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
             params=params,
             report=lambda name, message: LOG.info("%s: %s", name, message),
             planning_group="left_arm",
+            joint_signs=signs,
         )
         verified = planner.plan(
             name="normalize_left_arm",

@@ -195,6 +195,7 @@ class MoveItPlanner:
         num_planning_attempts: int = 12,
         minimum_link7_z: float | None = None,
         planning_group: str = "right_arm",
+        joint_signs: Sequence[int] | None = None,
     ) -> dict:
         if goal_constraint not in {"pose", "joints"}:
             raise SafetyAbort(
@@ -213,9 +214,20 @@ class MoveItPlanner:
         output_path = self.run_dir / f"{name}_plan.json"
         if planning_group not in {"right_arm", "left_arm"}:
             raise SafetyAbort(f"未知规划组: {planning_group!r}")
+        # The left arm's SDK and the URDF disagree about the direction of
+        # joints 2, 4 and 6 -- measured, not guessed, and matching the URDF's
+        # own 3.1415 on l_joint7 that the right arm carries on joint1.  Map on
+        # the way in and back on the way out, so every caller and the SDK stay
+        # in one convention and only this boundary knows about the other.
+        signs = np.asarray(joint_signs or [1] * 7, dtype=float)
+        if signs.shape != (7,) or not np.all(np.isin(signs, (1.0, -1.0))):
+            raise SafetyAbort("joint_signs 必须是 7 个 ±1")
+
+        def to_moveit(values):
+            return (signs * np.asarray(values, dtype=float)).tolist()
         request_payload = {
             "planning_group": planning_group,
-            "start_joints_deg": list(map(float, start_joints_deg)),
+            "start_joints_deg": to_moveit(start_joints_deg),
             # Named for the arm that is not being planned, whichever that
             # is; the old key is kept so an unchanged caller still works.
             "start_other_joints_deg": (
@@ -223,7 +235,7 @@ class MoveItPlanner:
                 if start_left_joints_deg is None
                 else list(map(float, start_left_joints_deg))
             ),
-            "goal_joints_deg": list(map(float, goal_joints_deg)),
+            "goal_joints_deg": to_moveit(goal_joints_deg),
             "target_flange": np.asarray(target_flange, dtype=float).tolist(),
             "goal_constraint": goal_constraint,
             "planner_id": str(planner_id),
@@ -275,6 +287,11 @@ class MoveItPlanner:
                 f"{detail}"
             )
         self._normalize_planned_arm_trajectory(plan, planning_group)
+        # Back into the SDK's convention before anyone downstream sees it.
+        plan["points_deg"] = [
+            (signs * np.asarray(point, dtype=float)).tolist()
+            for point in plan["points_deg"]
+        ]
         required_fk = ("start_link7_fk", "endpoint_link7_fk")
         missing_fk = [name for name in required_fk if not plan.get(name)]
         if missing_fk:

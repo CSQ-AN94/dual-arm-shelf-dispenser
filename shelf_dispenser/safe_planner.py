@@ -58,10 +58,12 @@ class SafeMotionPlanner:
         held_object: Optional[dict] = None,
         link7_to_controller_flange: np.ndarray | None = None,
         planning_group: str = "right_arm",
+        joint_signs: Sequence[int] | None = None,
     ):
         if planning_group not in {"right_arm", "left_arm"}:
             raise SafetyAbort(f"未知规划组: {planning_group!r}")
         self.planning_group = planning_group
+        self.joint_signs = joint_signs
         self.moveit = moveit
         self.robot = robot
         self.left_robot = left_robot
@@ -358,6 +360,7 @@ class SafeMotionPlanner:
                     trajectory = self.moveit.plan(
                         name=attempt_label,
                         planning_group=self.planning_group,
+                        joint_signs=self.joint_signs,
                         start_joints_deg=start_right,
                         start_left_joints_deg=start_left,
                         goal_joints_deg=target.goal_joints,

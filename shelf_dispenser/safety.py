@@ -160,6 +160,10 @@ class SafetyProfile:
     # part.  A shared field would let the left arm inherit by default, which is
     # exactly what the right record's evidence_id forbids.
     left_tool_mount_calibration: ToolMountCalibration | None = None
+    # Measured SDK<->MoveIt correspondence for the left arm: joint signs, the
+    # base bridge and the tool-side constant.  A plain dict, because it is
+    # evidence produced by one script and consumed by one other.
+    left_arm_model: dict | None = None
     # Poses handed to the fence are named in whichever arm's base frame
     # produced them.  Every box here is authored in the right arm's, so a
     # left-arm view carries the rigid transform that names its points in the
@@ -1401,6 +1405,7 @@ def load_safety_profile(
         grasp_frame=grasp_frame,
         tool_mount_calibration=tool_mount_calibration,
         left_tool_mount_calibration=left_tool_mount_calibration,
+        left_arm_model=raw.get("left_arm_model"),
     )
     # Validate that each allowed zone is itself inside the global workspace.
     for zone in profile.allowed_tcp_zones:

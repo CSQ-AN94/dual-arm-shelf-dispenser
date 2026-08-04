@@ -46,47 +46,52 @@ def assert_rigid(matrix) -> np.ndarray:
     return matrix
 
 
-def left_view(profile: SafetyProfile, base_right_to_base_left) -> SafetyProfile:
-    """The same fence, told how to read left-arm coordinates.
+def left_view(profile: SafetyProfile) -> SafetyProfile:
+    """The right arm's fence and planner, told how the left arm reports itself.
 
-    ``base_right_to_base_left`` is the measured 4x4 from ``config.yaml``: it
-    maps a point given in the left base frame into the right one, which is
-    exactly the conversion the fence needs.
+    Three constants separate the two, all measured together by
+    ``scripts/solve_left_arm_model.py`` (16 joint states, 0.583 mm / 0.108 deg):
 
-    This does not make the profile plannable for the left arm.  ``T_moveit_from
-    _profile`` is the bridge from the *right* controller base to the MoveIt
-    frame, and composing it with this transform does not produce the left one:
-    a real run on 2026-08-04 had MoveIt l_link7 FK and the SDK's left flange
-    disagree by 127.2 mm and 179.9 deg at the same joint state, and 180 deg is
-    not something a near-identity rotation accounts for.  The two arms'
-    controller base frames appear to differ by a half turn that this measured
-    transform -- taken between two head-camera eye-to-hand rounds -- does not
-    describe.  ``assert_left_bridge_measured`` gates on that separately.
+      * joints 2, 4 and 6 run the other way, applied in ``planner``;
+      * a bridge from the left controller base to the MoveIt frame, used here;
+      * a tool-side offset, already folded into the left arm's
+        ``T_link7_controller_flange`` -- it multiplies from the right, which is
+        why no base-frame bridge could ever absorb it, and why solving for one
+        alone left an 889 mm spread.
+
+    The fence conversion is derived from the two measured bridges rather than
+    from ``config.yaml``'s dual-arm transform: that one was taken between two
+    head-camera eye-to-hand rounds and does not describe the controller base
+    frames, which is what the 179.9 deg surprise was.
     """
+    model = getattr(profile, "left_arm_model", None)
+    if model is None:
+        raise SafetyAbort(
+            f"profile {profile.name} 缺少 left_arm_model；"
+            "先跑 scripts/solve_left_arm_model.py --write"
+        )
+    left_bridge = assert_rigid(model["T_moveit_from_left_profile"])
+    right_bridge = np.asarray(profile.T_moveit_from_profile, dtype=float)
     return replace(
         profile,
         name=f"{profile.name}__left",
-        tcp_frame_transform=assert_rigid(base_right_to_base_left),
+        T_moveit_from_profile=left_bridge,
+        tool_mount_calibration=profile.left_tool_mount_calibration,
+        # Left controller base -> right controller base, via the MoveIt frame
+        # both were measured against.
+        tcp_frame_transform=np.linalg.inv(right_bridge) @ left_bridge,
     )
 
 
-def assert_left_bridge_measured(profile: SafetyProfile) -> np.ndarray:
-    """Refuse left-arm planning until its own MoveIt bridge exists.
-
-    Caught by the runtime FK contract rather than by review, which is the right
-    order but an expensive one: the arm was powered, teleop stopped, and a plan
-    already computed.  Fail here instead, before anything opens.
-    """
-    bridge = getattr(profile, "T_moveit_from_left_profile", None)
-    if bridge is None:
-        raise SafetyAbort(
-            "左臂缺少自己的 MoveIt 坐标桥（T_moveit_from_left_profile）。"
-            "profile 里那份是右臂控制器基座到 MoveIt 的桥；2026-08-04 实测显示"
-            "同关节状态下 MoveIt l_link7 与 SDK 左法兰差 127.2 mm / 179.9°，"
-            "而双臂实测变换的旋转接近单位阵，合成消不掉这半圈。"
-            "先实测左臂的桥再开左臂规划"
-        )
-    return assert_rigid(bridge)
+def left_joint_signs(profile: SafetyProfile) -> tuple[int, ...]:
+    """Which joints the SDK and the URDF disagree about the direction of."""
+    model = getattr(profile, "left_arm_model", None)
+    if model is None:
+        raise SafetyAbort(f"profile {profile.name} 缺少 left_arm_model")
+    signs = tuple(int(s) for s in model["joint_signs"])
+    if len(signs) != 7 or any(s not in (1, -1) for s in signs):
+        raise SafetyAbort("left_arm_model.joint_signs 必须是 7 个 ±1")
+    return signs
 
 
 def open_left_arm(cfg, params, profile: SafetyProfile, *, take_control: bool):

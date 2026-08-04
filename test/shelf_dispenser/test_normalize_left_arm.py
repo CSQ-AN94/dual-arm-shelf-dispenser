@@ -70,25 +70,17 @@ def test_the_planning_group_plumbing_is_still_in_place():
     assert 'prefix = "r" if planning_group == "right_arm" else "l"' in planner
 
 
-def test_left_planning_is_gated_on_its_own_moveit_bridge():
-    """Found by the runtime FK contract on 2026-08-04, gated here instead.
-
-    The profile's T_moveit_from_profile bridges the *right* controller base to
-    the MoveIt frame.  Using it for the left arm put MoveIt l_link7 and the
-    SDK's left flange 127.2 mm and 179.9 deg apart at the same joint state, and
-    the measured dual-arm transform's rotation is within a degree of identity,
-    so composing the two cannot account for the half turn.
-    """
-    from shelf_dispenser.core import SafetyAbort
-    from shelf_dispenser.left_arm import assert_left_bridge_measured
-    from shelf_dispenser.safety import load_safety_profile
-
-    profile = load_safety_profile(PROFILES, "shelf_template", require_verified=True)
-    with pytest.raises(SafetyAbort, match="MoveIt 坐标桥"):
-        assert_left_bridge_measured(profile)
+def test_the_joint_signs_cross_the_moveit_boundary_and_come_back():
+    """Every valid left trajectory would be wrong if only one side mapped."""
+    planner = (ROOT / "shelf_dispenser" / "planner.py").read_text(encoding="utf-8")
+    assert '"start_joints_deg": to_moveit(start_joints_deg)' in planner
+    assert '"goal_joints_deg": to_moveit(goal_joints_deg)' in planner
+    # ...and the trajectory is mapped back before anything downstream sees it.
+    assert 'plan["points_deg"] = [' in planner
+    assert planner.index("_normalize_planned_arm_trajectory(plan") < planner.index(
+        'plan["points_deg"] = ['
+    )
 
     source = ENTRY.read_text(encoding="utf-8")
-    # It has to refuse before the arm is opened and teleop is disturbed.
-    assert source.index("assert_left_bridge_measured(profile)") < source.index(
-        "open_left_arm("
-    )
+    assert "joint_signs=signs" in source
+    assert "left_joint_signs(profile)" in source
