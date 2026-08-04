@@ -120,3 +120,81 @@ def test_arm_names_derives_both_arms_from_the_group():
 
     with pytest.raises(RuntimeError, match="unsupported planning group"):
         arm_names("both_arms")
+
+
+def test_a_worker_that_stops_answering_is_killed_not_waited_on():
+    """Regression: the timeout argument existed but readline() ignored it."""
+    import subprocess as sp
+    import time as clock
+
+    from shelf_dispenser import arm_worker
+
+    proxy = ArmProxy.__new__(ArmProxy)
+    # A worker that greets and then never speaks again, exactly like an arm
+    # whose SDK call hung.
+    process = sp.Popen(
+        [
+            sys.executable,
+            "-c",
+            'import sys,time;sys.stdout.write(\'{"ready": true}\\n\');'
+            "sys.stdout.flush();time.sleep(600)",
+        ],
+        stdin=sp.PIPE,
+        stdout=sp.PIPE,
+        stderr=sp.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    proxy._attach(process)
+    try:
+        assert proxy._read_line(5.0) == {"ready": True}
+        started = clock.monotonic()
+        with pytest.raises(SafetyAbort, match="没有回复"):
+            proxy._read_line(0.5)
+        elapsed = clock.monotonic() - started
+        assert elapsed < 5.0, f"等了 {elapsed:.1f}s，超时没有生效"
+        assert proxy._process.poll() is not None, "超时后没有终止 worker"
+    finally:
+        if proxy._process.poll() is None:
+            proxy._process.kill()
+    assert arm_worker._REQUEST_TIMEOUT_S > 0
+
+
+def test_sdk_banner_on_stdout_does_not_break_the_protocol():
+    """Regression, found on the robot: the reply stream is not ours alone.
+
+    The RealMan SDK prints "current c api version: v1.1.5" on stdout when it
+    loads, so the first line the parent read was not JSON and the handshake
+    died on a JSONDecodeError.  Stubs never showed it.
+    """
+    import subprocess as sp
+
+    proxy = ArmProxy.__new__(ArmProxy)
+    process = sp.Popen(
+        [
+            sys.executable,
+            "-c",
+            # One burst, then stay alive.  The earlier version exited, and the
+            # EOF is what made the read succeed -- it passed while the bug (a
+            # select on the fd beside a buffered readline) was still there.
+            "import sys, time\n"
+            "sys.stdout.write('current c api version:  v1.1.5\\n'\n"
+            "                 'some other library chatter\\n'\n"
+            '                 \'{"ready": true}\\n\'\n'
+            '                 \'{"ok": [1.0, 2.0]}\\n\')\n'
+            "sys.stdout.flush()\n"
+            "time.sleep(600)\n",
+        ],
+        stdin=sp.PIPE,
+        stdout=sp.PIPE,
+        stderr=sp.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    proxy._attach(process)
+    try:
+        assert proxy._read_line(10.0) == {"ready": True}
+        assert proxy._read_line(10.0) == {"ok": [1.0, 2.0]}
+    finally:
+        if proxy._process.poll() is None:
+            proxy._process.kill()

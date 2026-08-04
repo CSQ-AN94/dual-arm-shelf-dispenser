@@ -18,9 +18,12 @@ method nobody vetted for the non-primary arm.
 from __future__ import annotations
 
 import json
+import os
+import select
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -161,17 +164,82 @@ class ArmProxy:
             text=True,
             bufsize=1,
         )
-        self._lock = threading.Lock()
+        self._attach(self._process)
         handshake = self._read_line(_REQUEST_TIMEOUT_S)
         if not handshake.get("ready"):
             raise SafetyAbort(f"从臂进程启动失败: {handshake}")
 
+    def _attach(self, process: subprocess.Popen) -> None:
+        """Bind to a worker's streams.  Separate so tests can drive a stand-in."""
+        self._process = process
+        self._lock = threading.Lock()
+        self._stdout_fd = process.stdout.fileno()
+        self._buffer = ""
+        self._noise = []
+
     def _read_line(self, timeout_s: float) -> dict:
-        line = self._process.stdout.readline()
-        if not line:
-            stderr = (self._process.stderr.read() or "").strip()
-            raise SafetyAbort(f"从臂进程已退出: {stderr}")
-        return json.loads(line)
+        """Read one reply, or give up.
+
+        ``readline()`` on a pipe blocks forever, so the timeout this took as an
+        argument used to mean nothing: an arm whose SDK call hung left the
+        parent waiting with no way out.  Poll the pipe instead, and kill the
+        worker on expiry -- a worker that stopped answering is not one to keep
+        sending commands to.
+        """
+        deadline = time.monotonic() + timeout_s
+        while True:
+            line = self._take_buffered_line()
+            if line is not None:
+                # The RealMan SDK prints a banner on stdout when it loads
+                # ("current c api version: ..."), so the reply stream is not
+                # ours alone.  Keep the chatter for diagnostics and read on.
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    self._noise.append(line.rstrip())
+                    if len(self._noise) > 200:
+                        raise SafetyAbort(
+                            "从臂进程只输出了非 JSON 内容: "
+                            + " | ".join(self._noise[:5])
+                        )
+                    continue
+            # select reports on the file descriptor, so it must never be paired
+            # with a buffered reader: readline() would drain a burst into the
+            # wrapper's own buffer and select would then report nothing waiting
+            # while a complete reply sat there.  Read the fd directly.
+            if select.select([self._stdout_fd], [], [], 0.1)[0]:
+                chunk = os.read(self._stdout_fd, 65536)
+                if chunk:
+                    self._buffer += chunk.decode("utf-8", "replace")
+                    continue
+                raise SafetyAbort(f"从臂进程已退出: {self._drain_stderr()}")
+            if self._process.poll() is not None:
+                raise SafetyAbort(f"从臂进程已退出: {self._drain_stderr()}")
+            if time.monotonic() >= deadline:
+                self._process.kill()
+                # Reap it, so a later poll() reports the exit rather than None
+                # and the next _call refuses instead of writing to a dead pipe.
+                try:
+                    self._process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                raise SafetyAbort(
+                    f"从臂在 {timeout_s:.0f}s 内没有回复，已终止该进程"
+                    f"；stderr={self._drain_stderr()[:400]}"
+                )
+
+    def _take_buffered_line(self) -> str | None:
+        index = self._buffer.find("\n")
+        if index < 0:
+            return None
+        line, self._buffer = self._buffer[: index + 1], self._buffer[index + 1 :]
+        return line
+
+    def _drain_stderr(self) -> str:
+        try:
+            return (self._process.stderr.read() or "").strip()
+        except Exception:
+            return "(stderr 不可读)"
 
     def _call(self, method: str, *args, **kwargs):
         if method not in ALLOWED_METHODS:
@@ -192,7 +260,9 @@ class ArmProxy:
         return _revive(reply["ok"])
 
     def __getattr__(self, name: str):
-        if name not in ALLOWED_METHODS:
+        # Private attributes must fail as themselves; routing them through the
+        # whitelist turned "you skipped __init__" into "no such method".
+        if name.startswith("_") or name not in ALLOWED_METHODS:
             raise AttributeError(name)
         return lambda *args, **kwargs: self._call(name, *args, **kwargs)
 

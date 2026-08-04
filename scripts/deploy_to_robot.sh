@@ -54,7 +54,7 @@ if [ "$GO" = 0 ]; then
 fi
 
 echo "=== 传输中 ==="
-rsync -a --delete --info=stats1 "${EXCLUDES[@]}" "$ROOT/" "$HOST:$DEST/"
+rsync -a --delete --stats "${EXCLUDES[@]}" "$ROOT/" "$HOST:$DEST/"
 
 echo
 echo "=== 机器人上复核 ==="
