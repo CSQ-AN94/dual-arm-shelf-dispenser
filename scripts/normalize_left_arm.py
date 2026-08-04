@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     left_profile = left_view(profile)
     signs = left_joint_signs(profile)
 
+    link7_to_flange, _ = profile.left_tool_mount_calibration.require_transforms()
     left = open_left_arm(cfg, params, profile, take_control=cli.execute)
     right = ArmJointReader(cfg.connections.right_arm_ip, cfg.connections.arm_port)
     moveit = None
@@ -131,6 +132,10 @@ def main(argv: list[str] | None = None) -> int:
             report=lambda name, message: LOG.info("%s: %s", name, message),
             planning_group="left_arm",
             joint_signs=signs,
+            # Without this it silently falls back to the nominal +Z offset, so
+            # the runtime FK contract compares the left arm against the wrong
+            # tool and reports a disagreement the model does not have.
+            link7_to_controller_flange=link7_to_flange,
         )
         verified = planner.plan(
             name="normalize_left_arm",

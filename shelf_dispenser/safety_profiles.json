@@ -349,26 +349,26 @@
       "left_tool_mount_calibration": {
         "verified": true,
         "provenance": "nominal_unvalidated",
-        "evidence_id": "Nominal RMG24 geometry with the left arm's measured tool-side constant folded in. solve_left_arm_model 2026-08-04: 16 joint states, signs [1,-1,1,-1,1,-1,1], residual 0.537 mm / 0.10 deg over an independent 8-state check. The offset is the 3.14 the URDF puts on l_joint7 and not on the right arm's; it multiplies from the tool side, which is why solving for a base-frame bridge alone left an 889 mm spread. The fold direction was settled by residual, not by derivation -- the SDK's flange convention does not compose the way the naive algebra assumes, and the numbers say so. No left-arm grasp has held, so this stays free-space only.",
+        "evidence_id": "Nominal RMG24 geometry with the left arm's measured tool-side constant folded in: Rz(180 deg) and -87.15 mm along z, which is the 3.14 the URDF puts on l_joint7 and gives the right arm on joint1 instead. Solved as a hand-eye AX=XB over 24 joint states with no joint remapping; residual 0.678 mm / 0.108 deg. Forward kinematics only, nothing commanded. An earlier attempt attributed the same 178 deg to negated joints 2, 4 and 6; that matched link7 to 0.5 mm and put the elbow in a mirrored configuration, which MoveIt reported as the arm colliding with its own head. Endpoint agreement is not configuration agreement on a 7-DoF arm. No left-arm grasp has held, so this stays free-space only.",
         "measured_at_utc": "2026-08-04T09:52:19Z",
         "T_link7_controller_flange": [
           [
-            1.0,
+            -1.0,
+            1.2246467991473532e-16,
             0.0,
+            -0.0002301782479370039
+          ],
+          [
+            -1.2246467991473532e-16,
+            -1.0,
             0.0,
-            0.00013225448320143535
+            -0.00021367294687548585
           ],
           [
             0.0,
-            1.0,
-            0.0,
-            5.398136965450995e-05
-          ],
-          [
-            0.0,
             0.0,
             1.0,
-            0.07530432732653103
+            0.1043459520750089
           ],
           [
             0.0,
@@ -407,31 +407,31 @@
       "left_arm_model": {
         "joint_signs": [
           1,
-          -1,
           1,
-          -1,
           1,
-          -1,
+          1,
+          1,
+          1,
           1
         ],
         "T_moveit_from_left_profile": [
           [
-            -0.0001913815158913854,
-            -0.0003223009609976198,
-            0.9999999297476001,
-            0.062005096478522266
+            -0.9999999519317524,
+            -0.00030991720410001585,
+            9.371242308064061e-06,
+            0.062106599312500066
           ],
           [
-            -2.786733136149028e-05,
-            0.9999999476744665,
-            0.00032229563348317483,
-            -0.11035029386715038
+            0.00030991804227308766,
+            -0.9999999479638122,
+            8.957220387740944e-05,
+            -0.11029255919823638
           ],
           [
-            -0.9999999812982634,
-            -2.7805647976577606e-05,
-            -0.00019139048754513848,
-            -0.006224906239822241
+            9.343481853193832e-06,
+            8.957510388870681e-05,
+            0.9999999959445004,
+            -0.006131367570924255
           ],
           [
             0.0,
@@ -442,22 +442,22 @@
         ],
         "T_left_link7_tool_offset": [
           [
-            1.0,
+            -1.0,
+            -1.2246467991473532e-16,
             0.0,
+            -0.00023017824793700393
+          ],
+          [
+            1.2246467991473532e-16,
+            -1.0,
             0.0,
-            -6.612724160071768e-05
+            -0.00021367294687548583
           ],
           [
             0.0,
-            1.0,
-            0.0,
-            -2.6990684827254974e-05
-          ],
-          [
-            0.0,
             0.0,
             1.0,
-            -0.029052163663265518
+            -0.0871459520750089
           ],
           [
             0.0,
@@ -466,11 +466,11 @@
             1.0
           ]
         ],
-        "measured_at_utc": "2026-08-04T10:16:38Z",
-        "samples": 16,
-        "max_position_residual_m": 0.0005829148669649435,
-        "max_orientation_residual_deg": 0.10832403225170147,
-        "method": "Forward kinematics only, no motion commanded. moveit(q) = Bridge @ sdk(q with joints 2,4,6 negated) @ Tool, with Bridge's rotation from the mean of per-sample estimates and the two translations from one least squares. The signs and the tool-side constant match the URDF: r_joint1 carries a 3.1415 yaw that l_joint1 does not, and l_joint7 carries one the right arm does not."
+        "measured_at_utc": "2026-08-04T00:00:00Z",
+        "samples": 24,
+        "max_position_residual_m": 0.0006784165057551851,
+        "max_orientation_residual_deg": 0.1079347488100573,
+        "method": "moveit(q) = Bridge @ sdk(q) @ Tool, hand-eye AX=XB on relative motions for Tool's rotation, then one least squares for both translations once the rotation is fixed. No joint remapping: the joints go into MoveIt as the SDK reports them. Checked against MoveIt's own state validity -- the arm's current physical pose is collision-free in the model, which the earlier sign-flipped model reported as a head collision."
       }
     },
     "side_table_template": {

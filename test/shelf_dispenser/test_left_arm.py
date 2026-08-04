@@ -25,13 +25,24 @@ def _profile():
 
 
 def test_the_measured_model_is_present_and_closed():
-    """0.583 mm / 0.108 deg over 16 states -- the first real metrology here."""
+    """0.678 mm / 0.108 deg over 24 states, with the joints left alone.
+
+    An earlier model negated joints 2, 4 and 6 and matched link7 to 0.5 mm --
+    and put the elbow in a mirrored configuration that MoveIt reported as the
+    arm colliding with its own head.  Endpoint agreement is not configuration
+    agreement on a 7-DoF arm, so the signs staying at +1 is part of the result.
+    """
     model = _profile().left_arm_model
     assert model is not None
-    assert model["joint_signs"] == [1, -1, 1, -1, 1, -1, 1]
+    assert model["joint_signs"] == [1] * 7
     assert model["samples"] >= 12
     assert model["max_position_residual_m"] < 0.003
     assert model["max_orientation_residual_deg"] < 0.5
+
+    # The whole 180 degrees lives on the tool side, where the URDF puts it.
+    tool = np.asarray(model["T_left_link7_tool_offset"], dtype=float)
+    yaw = np.degrees(np.arctan2(tool[1, 0], tool[0, 0]))
+    assert abs(abs(yaw) - 180.0) < 1.0, yaw
 
 
 def test_left_view_swaps_the_bridge_and_the_tool_record():
@@ -76,9 +87,9 @@ def test_the_fence_conversion_is_consistent_with_both_bridges():
 
 def test_joint_signs_are_validated_not_trusted():
     profile = _profile()
-    assert left_joint_signs(profile) == (1, -1, 1, -1, 1, -1, 1)
+    assert left_joint_signs(profile) == (1,) * 7
 
-    broken = replace(profile, left_arm_model={"joint_signs": [1, -1, 1]})
+    broken = replace(profile, left_arm_model={"joint_signs": [1, 1, 1]})
     with pytest.raises(SafetyAbort, match="7 个"):
         left_joint_signs(broken)
     missing = replace(profile, left_arm_model=None)

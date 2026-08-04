@@ -84,3 +84,15 @@ def test_the_joint_signs_cross_the_moveit_boundary_and_come_back():
     source = ENTRY.read_text(encoding="utf-8")
     assert "joint_signs=signs" in source
     assert "left_joint_signs(profile)" in source
+
+
+def test_the_planner_is_given_the_left_tool_transform():
+    """Without it SafeMotionPlanner falls back to the nominal +Z offset.
+
+    The fallback is silent, and it makes the runtime FK contract compare the
+    left arm against the right arm's tool -- a disagreement the model does not
+    actually have.
+    """
+    source = ENTRY.read_text(encoding="utf-8")
+    assert "link7_to_controller_flange=link7_to_flange" in source
+    assert "left_tool_mount_calibration.require_transforms()" in source
