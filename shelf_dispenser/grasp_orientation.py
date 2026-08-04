@@ -32,6 +32,11 @@ class GraspFrameSpec:
 
 MEASURED = "measured"
 NOMINAL_FUNCTIONALLY_VALIDATED = "nominal_functionally_validated"
+# The nominal installation with nothing downstream having absorbed its error:
+# no metrology, and no task on this arm that succeeded and therefore proved the
+# residual small enough.  Representable so an arm can be moved in free space
+# under an honest label, never enough to grasp with.
+NOMINAL_UNVALIDATED = "nominal_unvalidated"
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,12 @@ class ToolMountCalibration:
         to transfer to another arm, another approach direction, or to a
         planner that derives the grasp point geometrically.
 
+    ``nominal_unvalidated``
+        The nominal installation, on an arm where nothing has yet absorbed its
+        error.  Free-space motion only: a fence check is wrong by whatever the
+        true offset is, which generous transit zones tolerate and a grasp does
+        not.  ``grasping_allowed`` is False.
+
     ``verified`` means the record was chosen deliberately either way -- it
     exists so a profile cannot silently fall back to an unexamined identity
     assumption.  It does not by itself mean anything was measured.
@@ -73,6 +84,20 @@ class ToolMountCalibration:
     max_orientation_residual_deg: float | None = None
     T_link7_controller_flange: np.ndarray | None = None
     T_controller_flange_tcp: np.ndarray | None = None
+
+    @property
+    def grasping_allowed(self) -> bool:
+        """Whether this record is good enough to close fingers on something."""
+        return self.provenance in (MEASURED, NOMINAL_FUNCTIONALLY_VALIDATED)
+
+    def require_grasping_transforms(self) -> tuple[np.ndarray, np.ndarray]:
+        """Transforms for a grasp, which an unvalidated nominal cannot back."""
+        if not self.grasping_allowed:
+            raise SafetyAbort(
+                f"工具标定 provenance={self.provenance} 只能用于自由空间运动，"
+                "不足以支撑抓取：标称偏差没有任何东西吸收过"
+            )
+        return self.require_transforms()
 
     def require_transforms(self) -> tuple[np.ndarray, np.ndarray]:
         """Return defensive copies only when this calibration is executable."""

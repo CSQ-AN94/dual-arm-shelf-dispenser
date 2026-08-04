@@ -345,7 +345,65 @@
             0.2
           ]
         }
-      ]
+      ],
+      "left_tool_mount_calibration": {
+        "verified": true,
+        "provenance": "nominal_unvalidated",
+        "evidence_id": "Nominal installation only: same RMG24 part as the right arm, so the same link7->flange (+Z 17.2 mm) and flange->TCP (+Z 151 mm) geometry from the robot description applies. What does NOT transfer is the right arm's functional validation -- that came from shelf grasps that held, with the residual absorbed by grasp_stop_short_m tuned against a real shelf. No left-arm grasp has ever held, so nothing here has absorbed anything. Free-space motion only; grasping_allowed is False until this is measured or a left grasp is tuned the same way.",
+        "measured_at_utc": "2026-08-04T09:52:19Z",
+        "T_link7_controller_flange": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0172
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_controller_flange_tcp": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.151
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
     },
     "side_table_template": {
       "description": "DISABLED, UNVERIFIED fill-in-only measurement template for the post-turn right-side table. Every null side-table value must be measured and independently reviewed before it is entered. The retained frame bridge is a prior calibration, not a substitute for the required workspace, keepout, body-pose, lift, transport-pose, table, bottle/TCP, or rotation-sweep measurements. The right-arm-base to platform and right-arm-base to head-camera transforms stay invariant across lift; do not add lift height to either transform.",

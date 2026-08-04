@@ -14,6 +14,7 @@ from .core import SafetyAbort
 from .grasp_orientation import (
     MEASURED,
     NOMINAL_FUNCTIONALLY_VALIDATED,
+    NOMINAL_UNVALIDATED,
     GraspFrameSpec,
     ToolMountCalibration,
     authored_tcp_rotation,
@@ -155,6 +156,25 @@ class SafetyProfile:
     # controller flange and MoveIt r_link7.  Shelf execution therefore uses
     # this explicit measured chain instead of inferring one from TCP-Z.
     tool_mount_calibration: ToolMountCalibration | None = None
+    # The left tool is a separate record even though it is the same gripper
+    # part.  A shared field would let the left arm inherit by default, which is
+    # exactly what the right record's evidence_id forbids.
+    left_tool_mount_calibration: ToolMountCalibration | None = None
+    # Poses handed to the fence are named in whichever arm's base frame
+    # produced them.  Every box here is authored in the right arm's, so a
+    # left-arm view carries the rigid transform that names its points in the
+    # same frame.  Converting the point is exact; rewriting the boxes is not,
+    # because the axis-aligned hull of a rotated box is larger than the box --
+    # which for an allowed zone hands out space the fence never granted.
+    tcp_frame_transform: np.ndarray | None = None
+
+    def in_fence_frame(self, point: Sequence[float]) -> np.ndarray:
+        """Name a point in the frame the fence boxes are authored in."""
+        point = np.asarray(point, dtype=float)
+        if self.tcp_frame_transform is None:
+            return point
+        matrix = np.asarray(self.tcp_frame_transform, dtype=float)
+        return matrix[:3, :3] @ point + matrix[:3, 3]
 
     def assert_grasp_start(
         self,
@@ -230,6 +250,7 @@ class SafetyProfile:
         point = np.asarray(point, dtype=float)
         if point.shape != (3,) or not np.all(np.isfinite(point)):
             raise SafetyAbort(f"{label} 的 TCP 坐标无效: {point.tolist()}")
+        point = self.in_fence_frame(point)
         if not self.tcp_workspace.contains(point, margin):
             raise FenceViolation(
                 f"{label} 越出总工作空间: {np.round(point, 4).tolist()}",
@@ -548,6 +569,7 @@ def _load_tool_mount_calibration(
     raw: dict,
     *,
     profile_name: str,
+    key: str = "tool_mount_calibration",
 ) -> ToolMountCalibration | None:
     """Parse an auditable link7/controller/TCP calibration chain.
 
@@ -556,23 +578,27 @@ def _load_tool_mount_calibration(
     full proper transforms and provenance/residuals; a scalar Z offset is not
     an acceptable substitute for a tool-installation rotation.
     """
-    data = raw.get("tool_mount_calibration")
+    data = raw.get(key)
     if data is None:
         return None
     if not isinstance(data, dict):
         raise SafetyAbort(
-            f"电子围栏 profile {profile_name} 的 tool_mount_calibration 必须是对象"
+            f"电子围栏 profile {profile_name} 的 {key} 必须是对象"
         )
-    label = f"profile {profile_name}.tool_mount_calibration"
+    label = f"profile {profile_name}.{key}"
     verified = _strict_bool(data.get("verified"), label=f"{label}.verified")
     if not verified:
         return ToolMountCalibration(verified=False)
 
     provenance = data.get("provenance", MEASURED)
-    if provenance not in (MEASURED, NOMINAL_FUNCTIONALLY_VALIDATED):
+    if provenance not in (
+        MEASURED,
+        NOMINAL_FUNCTIONALLY_VALIDATED,
+        NOMINAL_UNVALIDATED,
+    ):
         raise SafetyAbort(
-            f"{label}.provenance 必须是 {MEASURED} 或 "
-            f"{NOMINAL_FUNCTIONALLY_VALIDATED}"
+            f"{label}.provenance 必须是 {MEASURED}、"
+            f"{NOMINAL_FUNCTIONALLY_VALIDATED} 或 {NOMINAL_UNVALIDATED}"
         )
     evidence_id = data.get("evidence_id")
     measured_at_utc = data.get("measured_at_utc")
@@ -595,15 +621,14 @@ def _load_tool_mount_calibration(
         )
     except SafetyAbort:
         raise
-    if provenance == NOMINAL_FUNCTIONALLY_VALIDATED:
+    if provenance in (NOMINAL_FUNCTIONALLY_VALIDATED, NOMINAL_UNVALIDATED):
         # No metrology happened, so there is nothing to report a residual for.
         # Refuse a record that claims one anyway: that is exactly how the
         # nominal +Z fallback came to look like a 0.042 mm measurement.
         for key in ("max_position_residual_m", "max_orientation_residual_deg"):
             if data.get(key) is not None:
                 raise SafetyAbort(
-                    f"{label}.{key} 不能与 "
-                    f"provenance={NOMINAL_FUNCTIONALLY_VALIDATED} 并存："
+                    f"{label}.{key} 不能与 provenance={provenance} 并存："
                     "没有实测就没有残差"
                 )
         return ToolMountCalibration(
@@ -1321,6 +1346,11 @@ def load_safety_profile(
         raw,
         profile_name=profile_name,
     )
+    left_tool_mount_calibration = _load_tool_mount_calibration(
+        raw,
+        profile_name=profile_name,
+        key="left_tool_mount_calibration",
+    )
     # This is a property of the installed right-hand tool, not of one
     # particular grasp authoring mode.  Requiring it for every real execution
     # profile prevents a future profile from silently deleting grasp_frame and
@@ -1370,6 +1400,7 @@ def load_safety_profile(
         demonstrated_grasp_right_joints_deg=demonstrated_grasp_right_joints_deg,
         grasp_frame=grasp_frame,
         tool_mount_calibration=tool_mount_calibration,
+        left_tool_mount_calibration=left_tool_mount_calibration,
     )
     # Validate that each allowed zone is itself inside the global workspace.
     for zone in profile.allowed_tcp_zones:

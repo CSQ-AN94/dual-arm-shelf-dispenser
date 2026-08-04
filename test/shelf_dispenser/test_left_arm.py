@@ -1,5 +1,6 @@
 """The left arm's fence must mean the same physical place as the right's."""
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,7 +8,7 @@ import numpy as np
 import pytest
 
 from shelf_dispenser.core import SafetyAbort
-from shelf_dispenser.left_arm import LeftArmFence, arrival_error_deg, open_left_arm
+from shelf_dispenser.left_arm import arrival_error_deg, left_view, open_left_arm
 from shelf_dispenser.safety import load_safety_profile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,16 +40,18 @@ def test_the_verdict_is_identical_to_the_right_arm_fence_everywhere():
     including ones deliberately placed either side of a zone edge.
     """
     profile = _profile()
-    fence = LeftArmFence(profile, BASE_RIGHT_TO_BASE_LEFT)
+    left = left_view(profile, BASE_RIGHT_TO_BASE_LEFT)
     rotation = BASE_RIGHT_TO_BASE_LEFT[:3, :3]
     translation = BASE_RIGHT_TO_BASE_LEFT[:3, 3]
 
-    def right_verdict(point) -> bool:
-        return bool(
-            profile.tcp_workspace.contains(point, profile.clearance_m)
-            and any(z.contains(point, 0.0) for z in profile.allowed_tcp_zones)
-            and not any(b.contains(point, 0.0) for b in profile.keepout_boxes)
-        )
+    def verdict(view, point) -> bool:
+        # The same code path for both, so this compares frames rather than two
+        # people's idea of what the fence rule is.
+        try:
+            view.assert_tcp_point(point, label="点")
+        except SafetyAbort:
+            return False
+        return True
 
     rng = np.random.default_rng(0)
     lower = np.asarray(profile.tcp_workspace.minimum) - 0.1
@@ -59,51 +62,59 @@ def test_the_verdict_is_identical_to_the_right_arm_fence_everywhere():
             samples.append(np.asarray(corner) + 1e-4)
             samples.append(np.asarray(corner) - 1e-4)
 
+    disagreements = 0
     for in_right in samples:
         in_left = rotation.T @ (np.asarray(in_right) - translation)
-        assert fence.contains(in_left) == right_verdict(in_right), in_right
+        if verdict(left, in_left) != verdict(profile, in_right):
+            disagreements += 1
+    assert disagreements == 0, f"{disagreements}/{len(samples)} 个点两边判定不一致"
 
 
 def test_the_point_conversion_round_trips():
-    fence = LeftArmFence(_profile(), BASE_RIGHT_TO_BASE_LEFT)
+    left = left_view(_profile(), BASE_RIGHT_TO_BASE_LEFT)
     rotation = BASE_RIGHT_TO_BASE_LEFT[:3, :3]
     translation = BASE_RIGHT_TO_BASE_LEFT[:3, 3]
     point = np.array([0.163, 0.396, -0.180])
     in_left = rotation.T @ (point - translation)
-    assert fence.to_right_base(in_left) == pytest.approx(point)
+    assert left.in_fence_frame(in_left) == pytest.approx(point)
+    # The right-arm view must be untouched by the left one existing.
+    assert _profile().tcp_frame_transform is None
 
 
 def test_a_transform_that_is_not_a_rigid_motion_is_refused():
     profile = _profile()
     with pytest.raises(SafetyAbort, match="4x4"):
-        LeftArmFence(profile, np.eye(3))
+        left_view(profile, np.eye(3))
     skewed = np.eye(4)
     skewed[0, 0] = 2.0
     with pytest.raises(SafetyAbort, match="正交"):
-        LeftArmFence(profile, skewed)
+        left_view(profile, skewed)
 
 
 def test_malformed_points_are_refused():
-    fence = LeftArmFence(_profile(), BASE_RIGHT_TO_BASE_LEFT)
-    with pytest.raises(SafetyAbort, match="三个有限数"):
-        fence.to_right_base([0.0, 0.0])
-    with pytest.raises(SafetyAbort, match="三个有限数"):
-        fence.to_right_base([float("nan"), 0.0, 0.0])
+    left = left_view(_profile(), BASE_RIGHT_TO_BASE_LEFT)
+    for bad in ([0.0, 0.0], [float("nan"), 0.0, 0.0]):
+        with pytest.raises(SafetyAbort, match="TCP 坐标无效"):
+            left.assert_tcp_point(bad, label="坏点")
 
 
-def test_the_left_arm_refuses_to_borrow_the_right_arm_tool_calibration():
-    """The profile's own evidence_id forbids exactly this transfer."""
+def test_the_left_arm_uses_its_own_record_and_refuses_without_one():
+    """The right record's evidence_id forbids the transfer; honour that."""
     profile = _profile()
     assert "do not transfer to the left arm" in (
         profile.tool_mount_calibration.evidence_id
     )
+    assert profile.left_tool_mount_calibration is not None
+
+    # With the left record removed, the entry must refuse rather than fall back.
+    stripped = replace(profile, left_tool_mount_calibration=None)
     with pytest.raises(SafetyAbort, match="左臂工具标定"):
         open_left_arm(
             SimpleNamespace(connections=SimpleNamespace()),
             SimpleNamespace(
                 tcp_z_m=0.151, moveit_link7_to_controller_flange_m=0.0172
             ),
-            profile,
+            stripped,
             take_control=False,
         )
 

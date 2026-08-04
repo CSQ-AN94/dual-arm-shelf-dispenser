@@ -6,16 +6,21 @@ was the machinery's fault:
 * The RealMan SDK's ``Algo`` is process-global, so a second ``RobotSession``
   overwrites the first one's kinematics.  ``ArmProxy`` gives the left arm its
   own process.
-* Every fence box in ``safety_profiles.json`` is expressed in the *right* arm's
+* Every fence box in ``safety_profiles.json`` is authored in the *right* arm's
   base frame, while the left arm's own FK reports poses in the *left* base
-  frame.  Checking one against the other would silently compare two different
-  origins 120 mm apart.
+  frame.  Checking one against the other silently compares two origins 120 mm
+  apart.
 
-``left_view`` solves the second by moving the fence into the left arm's frame
-once, rather than converting every dense trajectory point.  ``SafeMotionPlanner``
-then needs no knowledge that it is planning the other arm: it only ever asks the
-robot object for ``joints_deg``, ``controller_flange_from_joints`` and
-``validate_planned_joints``, all of which the proxy forwards.
+``left_view`` solves the second by handing the profile the rigid transform that
+names left-arm points in the fence's frame.  Every existing caller of
+``assert_tcp_point`` and ``assert_tcp_path`` then works unchanged -- the dense
+re-check inside ``SafeMotionPlanner`` included.
+
+An earlier version rewrote each box into the left frame instead.  That is not
+equivalent: a rotated box is not axis aligned, and bounding it grows the box.
+For a keepout that is conservative, but for an *allowed* zone it grants space
+the fence never had, and a point could pass the left-framed check while landing
+outside every zone the real fence has.
 """
 
 from __future__ import annotations
@@ -26,57 +31,62 @@ from typing import Sequence
 import numpy as np
 
 from .core import SafetyAbort
-from .safety import FenceBox, SafetyProfile
+from .safety import SafetyProfile
 
 
-def _assert_rigid(matrix: np.ndarray) -> np.ndarray:
+def assert_rigid(matrix) -> np.ndarray:
     matrix = np.asarray(matrix, dtype=float)
     if matrix.shape != (4, 4) or not np.all(np.isfinite(matrix)):
         raise SafetyAbort("双臂基座变换必须是 4x4 有限矩阵")
     rotation = matrix[:3, :3]
     if not np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-3):
         raise SafetyAbort("双臂基座变换的旋转部分不是正交阵")
+    if not np.allclose(matrix[3], [0.0, 0.0, 0.0, 1.0], atol=1e-9):
+        raise SafetyAbort("双臂基座变换的齐次末行无效")
     return matrix
 
 
-class LeftArmFence:
-    """The right arm's fence, applied to left-arm poses without moving it.
+def left_view(profile: SafetyProfile, base_right_to_base_left) -> SafetyProfile:
+    """The same fence, told how to read left-arm coordinates.
 
-    Rewriting each box into the left base frame looked cheaper -- one conversion
-    instead of one per trajectory point -- but a rotated box is not axis
-    aligned, and bounding it grows the box.  For a keepout that is conservative;
-    for an *allowed* zone it hands out space the fence never granted, and a
-    point can pass the left-framed zone while landing outside every zone the
-    real fence has.  Codex reproduced exactly that.
+    ``base_right_to_base_left`` is the measured 4x4 from ``config.yaml``: it
+    maps a point given in the left base frame into the right one, which is
+    exactly the conversion the fence needs.
 
-    So convert the point instead.  It is exact in both directions, and the
-    fence stays the single artefact everyone reads.
+    This does not make the profile plannable for the left arm.  ``T_moveit_from
+    _profile`` is the bridge from the *right* controller base to the MoveIt
+    frame, and composing it with this transform does not produce the left one:
+    a real run on 2026-08-04 had MoveIt l_link7 FK and the SDK's left flange
+    disagree by 127.2 mm and 179.9 deg at the same joint state, and 180 deg is
+    not something a near-identity rotation accounts for.  The two arms'
+    controller base frames appear to differ by a half turn that this measured
+    transform -- taken between two head-camera eye-to-hand rounds -- does not
+    describe.  ``assert_left_bridge_measured`` gates on that separately.
     """
+    return replace(
+        profile,
+        name=f"{profile.name}__left",
+        tcp_frame_transform=assert_rigid(base_right_to_base_left),
+    )
 
-    def __init__(self, profile: SafetyProfile, base_right_to_base_left):
-        matrix = _assert_rigid(base_right_to_base_left)
-        self.profile = profile
-        self._rotation = matrix[:3, :3]
-        self._translation = matrix[:3, 3]
 
-    def to_right_base(self, point) -> np.ndarray:
-        """A point named in the left base frame, named in the right one."""
-        point = np.asarray(point, dtype=float)
-        if point.shape != (3,) or not np.all(np.isfinite(point)):
-            raise SafetyAbort("左臂 TCP 必须是三个有限数")
-        return self._rotation @ point + self._translation
+def assert_left_bridge_measured(profile: SafetyProfile) -> np.ndarray:
+    """Refuse left-arm planning until its own MoveIt bridge exists.
 
-    def contains(self, point) -> bool:
-        moved = self.to_right_base(point)
-        return bool(
-            self.profile.tcp_workspace.contains(moved, self.profile.clearance_m)
-            and any(
-                zone.contains(moved, 0.0) for zone in self.profile.allowed_tcp_zones
-            )
-            and not any(
-                box.contains(moved, 0.0) for box in self.profile.keepout_boxes
-            )
+    Caught by the runtime FK contract rather than by review, which is the right
+    order but an expensive one: the arm was powered, teleop stopped, and a plan
+    already computed.  Fail here instead, before anything opens.
+    """
+    bridge = getattr(profile, "T_moveit_from_left_profile", None)
+    if bridge is None:
+        raise SafetyAbort(
+            "左臂缺少自己的 MoveIt 坐标桥（T_moveit_from_left_profile）。"
+            "profile 里那份是右臂控制器基座到 MoveIt 的桥；2026-08-04 实测显示"
+            "同关节状态下 MoveIt l_link7 与 SDK 左法兰差 127.2 mm / 179.9°，"
+            "而双臂实测变换的旋转接近单位阵，合成消不掉这半圈。"
+            "先实测左臂的桥再开左臂规划"
         )
+    return assert_rigid(bridge)
 
 
 def open_left_arm(cfg, params, profile: SafetyProfile, *, take_control: bool):
@@ -92,7 +102,7 @@ def open_left_arm(cfg, params, profile: SafetyProfile, *, take_control: bool):
     right for the left one -- that number is nominal, with its residual absorbed
     by a stop-short distance tuned on the right arm against a real shelf.  Using
     it here would put a wrong TCP into every fence check silently.  Measure the
-    left tool, record it as ``left_tool_mount_calibration``, then this opens.
+    left tool with ``scripts/measure_left_tool_mount.py``, and this opens.
     """
     from .arm_worker import ArmProxy
 
@@ -102,7 +112,7 @@ def open_left_arm(cfg, params, profile: SafetyProfile, *, take_control: bool):
             f"profile {profile.name} 没有左臂工具标定；"
             "右臂那份的 evidence_id 明确写着不得迁移到左臂"
             "（它是 nominal，残差靠右臂实测的 grasp_stop_short_m 吸收）。"
-            "先实测左臂工具链并写入 left_tool_mount_calibration"
+            "先跑 scripts/measure_left_tool_mount.py 实测"
         )
     link7_to_flange, flange_to_tcp = left_calibration.require_transforms()
     return ArmProxy(
