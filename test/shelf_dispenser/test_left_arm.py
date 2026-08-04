@@ -122,3 +122,24 @@ def test_arrival_error_rejects_malformed_joints():
         arrival_error_deg([1.0] * 6, [1.0] * 7)
     with pytest.raises(SafetyAbort, match="非有限"):
         arrival_error_deg([float("nan")] * 7, [1.0] * 7)
+
+
+def test_the_session_keeps_the_nominal_chain_and_the_planner_gets_the_folded_one():
+    """Regression: the tool constant was applied twice.
+
+    ``controller_flange_from_joints`` is defined against whatever link7
+    transform the session was opened with, so configuring the session with the
+    folded value folds it again.  The runtime FK contract reported precisely
+    the unfolded residual -- 28.9 mm, 179.9 deg -- which is what gave it away.
+    """
+    source = (
+        Path(__file__).resolve().parents[2] / "shelf_dispenser" / "left_arm.py"
+    ).read_text(encoding="utf-8")
+    open_body = source[source.index("def open_left_arm(") :]
+    assert "link7_to_controller_flange=" not in open_body
+    assert "tcp_transform=flange_to_tcp" in open_body
+
+    entry = (
+        Path(__file__).resolve().parents[2] / "scripts" / "normalize_left_arm.py"
+    ).read_text(encoding="utf-8")
+    assert "link7_to_controller_flange=link7_to_flange" in entry

@@ -119,7 +119,14 @@ def open_left_arm(cfg, params, profile: SafetyProfile, *, take_control: bool):
             "（它是 nominal，残差靠右臂实测的 grasp_stop_short_m 吸收）。"
             "先跑 scripts/measure_left_tool_mount.py 实测"
         )
-    link7_to_flange, flange_to_tcp = left_calibration.require_transforms()
+    _, flange_to_tcp = left_calibration.require_transforms()
+    # The session is configured with the nominal chain, not the folded one.
+    # ``controller_flange_from_joints`` is defined against whatever link7
+    # transform the session holds, so handing it the folded value applies the
+    # tool constant twice -- the runtime FK contract reported exactly the
+    # unfolded residual, 28.9 mm and 179.9 deg, which is how this surfaced.
+    # The folded transform belongs to the planner, which is the thing that has
+    # to speak MoveIt's frame.
     return ArmProxy(
         cfg.connections.left_arm_ip,
         cfg.connections.arm_port,
@@ -127,7 +134,6 @@ def open_left_arm(cfg, params, profile: SafetyProfile, *, take_control: bool):
         model_flange_offset_m=params.moveit_link7_to_controller_flange_m,
         take_control=take_control,
         tcp_transform=flange_to_tcp,
-        link7_to_controller_flange=link7_to_flange,
     )
 
 

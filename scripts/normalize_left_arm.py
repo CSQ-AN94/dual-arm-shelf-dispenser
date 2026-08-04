@@ -68,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         "--output-dir", default=str(ROOT / "outputs" / "left_arm_normalize")
     )
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--speed", type=int, default=30)
     parser.add_argument(
         "--target-joints",
         type=float,
@@ -156,8 +157,22 @@ def main(argv: list[str] | None = None) -> int:
         points = [
             list(map(float, point)) for point in verified.trajectory["points_deg"]
         ]
-        left.validate_planned_joints(points, measured_start=current)
-        left.execute_planned_joints(points)
+        # Joint limits, margin and step size in the worker; the fence here,
+        # because a SafetyProfile cannot cross the worker's JSON boundary and
+        # should not -- the fence is the parent's job and it needs the left
+        # view, which only the parent has.
+        left.validate_planned_joints(
+            points,
+            params.max_joint_step_deg,
+            left_profile,
+            start_joints_deg=current,
+        )
+        left.execute_planned_joints(
+            points,
+            cli.speed,
+            params.max_joint_step_deg,
+            expected_start_joints_deg=current,
+        )
         reached = list(left.joints_deg())
         error = arrival_error_deg(reached, target)
         if error > params.planned_start_tolerance_deg:

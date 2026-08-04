@@ -259,6 +259,41 @@ class ArmProxy:
             raise SafetyAbort(f"从臂 {method} 失败: {reply['error']}")
         return _revive(reply["ok"])
 
+    def validate_planned_joints(
+        self,
+        points_deg,
+        max_step_deg,
+        safety_profile,
+        start_joints_deg=None,
+        joint_limit_margin_deg: float = 3.0,
+    ) -> int:
+        """Split the check across the process boundary along its natural seam.
+
+        The worker owns the arm's limits, so joint bounds, margin and step size
+        belong there.  The fence is a ``SafetyProfile``, which does not cross a
+        JSON boundary and should not have to: it is the parent that knows which
+        frame this arm reports in.  So the worker gets the joint half and the
+        parent runs the fence on the TCP points it asks the worker for.
+        """
+        count = self._call(
+            "validate_planned_joints",
+            points_deg,
+            max_step_deg,
+            None,
+            start_joints_deg=start_joints_deg,
+            joint_limit_margin_deg=joint_limit_margin_deg,
+        )
+        if safety_profile is not None:
+            safety_profile.assert_tcp_path(
+                [
+                    np.asarray(self._call("tcp_from_joints", point), dtype=float)[
+                        :3, 3
+                    ].tolist()
+                    for point in points_deg
+                ]
+            )
+        return count
+
     def __getattr__(self, name: str):
         # Private attributes must fail as themselves; routing them through the
         # whitelist turned "you skipped __init__" into "no such method".
