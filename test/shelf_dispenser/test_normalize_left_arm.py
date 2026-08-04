@@ -47,6 +47,7 @@ def test_the_entry_plans_the_left_group_against_the_converted_fence():
     assert "left_view(" in source
     # The other arm goes in as live collision scene, not as the planned arm.
     assert "left_robot=right" in source
+    assert "collision_boxes=left_profile.moveit_collision_boxes()" in source
     # The dense re-check runs before anything executes.
     assert source.index("validate_planned_joints") < source.index(
         "execute_planned_joints"
@@ -120,3 +121,16 @@ def test_the_dense_recheck_knows_which_arm_it_is_checking():
     safe = (ROOT / "shelf_dispenser" / "safe_planner.py").read_text(encoding="utf-8")
     postcheck = safe[safe.index("validate_exact_path(") :]
     assert "planning_group=self.planning_group" in postcheck[:400]
+    assert "joint_signs=self.joint_signs" in postcheck[:500]
+
+
+def test_tool_guard_follows_the_planning_group():
+    helper = (
+        ROOT / "shelf_dispenser" / "ros" / "scene_helpers.py"
+    ).read_text(encoding="utf-8")
+    body = helper[helper.index("def attach_tool_guard(") :]
+    assert 'prefix = "r" if planning_group == "right_arm" else "l"' in body
+    assert 'else "l_hand_link"' in body
+    assert "link_name=link7" in body
+    assert 'link_name="r_link7"' not in body
+    assert 'data.get("planning_group", "right_arm")' in body

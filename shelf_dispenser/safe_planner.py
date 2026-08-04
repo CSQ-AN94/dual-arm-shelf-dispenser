@@ -475,6 +475,7 @@ class SafeMotionPlanner:
                     self.moveit.validate_exact_path(
                         name=f"{attempt_label}_postcheck",
                         planning_group=self.planning_group,
+                        joint_signs=self.joint_signs,
                         start_left_joints_deg=start_left,
                         points_deg=dense_joint_points,
                         obstacles=moveit_obstacles,

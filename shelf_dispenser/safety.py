@@ -171,6 +171,12 @@ class SafetyProfile:
     # because the axis-aligned hull of a rotated box is larger than the box --
     # which for an allowed zone hands out space the fence never granted.
     tcp_frame_transform: np.ndarray | None = None
+    # Robot poses and authored fence geometry normally share one source frame.
+    # A left-arm view is the exception: its SDK poses start in the left
+    # controller base, while every workspace/zone/keepout remains authored in
+    # the right controller base.  Keep the two MoveIt bridges explicit so
+    # changing the pose bridge cannot silently move the shelf.
+    T_moveit_from_fence: np.ndarray | None = None
 
     def in_fence_frame(self, point: Sequence[float]) -> np.ndarray:
         """Name a point in the frame the fence boxes are authored in."""
@@ -341,15 +347,42 @@ class SafetyProfile:
         return result
 
     def moveit_workspace(self) -> dict:
-        minimum = self.point_to_moveit(self.tcp_workspace.minimum)
-        maximum = self.point_to_moveit(self.tcp_workspace.maximum)
+        """The volume MoveIt may search, which must not exceed what the fence allows.
+
+        This used to hand MoveIt the total workspace while the fence judged
+        against the allowed zones, which are smaller.  A sampling planner fills
+        whatever space it is given, so it kept producing paths that grazed the
+        gap between the two and were then refused after the fact -- and
+        widening the zones only moved the next refusal further out, because the
+        planner simply used the new room as well.
+
+        Bounding the search by the zones instead tells the planner where it is
+        actually allowed to go.  The zones are a union and this is their
+        bounding box, so it is not exact: a path can still leave them and be
+        caught afterwards.  It is a much smaller gap than eight centimetres.
+        """
+        lower = np.minimum.reduce(
+            [np.asarray(zone.minimum, dtype=float) for zone in self.allowed_tcp_zones]
+        )
+        upper = np.maximum.reduce(
+            [np.asarray(zone.maximum, dtype=float) for zone in self.allowed_tcp_zones]
+        )
+        lower = np.maximum(lower, np.asarray(self.tcp_workspace.minimum, dtype=float))
+        upper = np.minimum(upper, np.asarray(self.tcp_workspace.maximum, dtype=float))
+        minimum = self.point_to_moveit(lower)
+        maximum = self.point_to_moveit(upper)
         return {
             "min": np.minimum(minimum, maximum).tolist(),
             "max": np.maximum(minimum, maximum).tolist(),
         }
 
     def point_to_moveit(self, point: Sequence[float]) -> np.ndarray:
-        return (self.T_moveit_from_profile @ np.r_[point, 1.0])[:3]
+        transform = (
+            self.T_moveit_from_profile
+            if self.T_moveit_from_fence is None
+            else np.asarray(self.T_moveit_from_fence, dtype=float)
+        )
+        return (transform @ np.r_[point, 1.0])[:3]
 
     def points_to_moveit(
         self, points: Iterable[Sequence[float]]

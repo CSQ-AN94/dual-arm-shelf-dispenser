@@ -142,8 +142,8 @@ def _attached_box(*, object_id, link_name, size, center, quaternion, touch_links
     return attached
 
 
-def attach_tool_guard(scene, guard, held_object=None):
-    """Attach the gripper stand-in volume to r_link7.
+def attach_tool_guard(scene, guard, held_object=None, planning_group="right_arm"):
+    """Attach the gripper stand-in volume to the arm being planned.
 
     The enclosing scene's robot_state must be a diff: a non-diff robot state
     replaces the whole scene robot state and silently drops this attachment
@@ -151,27 +151,33 @@ def attach_tool_guard(scene, guard, held_object=None):
     """
     if not guard and not held_object:
         return
+    if planning_group not in ("right_arm", "left_arm"):
+        raise RuntimeError(f"unsupported planning group: {planning_group!r}")
+    prefix = "r" if planning_group == "right_arm" else "l"
+    link7 = f"{prefix}_link7"
+    hand = "r_hand" if planning_group == "right_arm" else "l_hand_link"
+    touch_links = [f"{prefix}_link6", link7, hand]
     attached_objects = []
     if guard:
         attached_objects.append(
             _attached_box(
                 object_id="bottle_tool_guard",
-                link_name="r_link7",
+                link_name=link7,
                 size=[guard["xy"], guard["xy"], guard["length"]],
                 center=[0.0, 0.0, guard["center_z"]],
                 quaternion=[0.0, 0.0, 0.0, 1.0],
-                touch_links=["r_link6", "r_link7", "r_hand"],
+                touch_links=touch_links,
             )
         )
     if held_object:
         attached_objects.append(
             _attached_box(
                 object_id="held_bottle_guard",
-                link_name="r_link7",
+                link_name=link7,
                 size=held_object["size"],
                 center=held_object["center"],
                 quaternion=held_object["quaternion_xyzw"],
-                touch_links=["r_link6", "r_link7", "r_hand"],
+                touch_links=touch_links,
             )
         )
     scene.robot_state.is_diff = True
@@ -187,4 +193,9 @@ def build_request_scene(scene, node, frame_id, data):
     )
     for item in data.get("boxes", []):
         add_box(scene, frame_id, item["id"], item["center"], item["size"])
-    attach_tool_guard(scene, data.get("tool_guard"), data.get("held_object"))
+    attach_tool_guard(
+        scene,
+        data.get("tool_guard"),
+        data.get("held_object"),
+        data.get("planning_group", "right_arm"),
+    )

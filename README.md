@@ -100,9 +100,11 @@ second arm.
 
 `ros/plan_once.py` derives joint and link names from the planning group, so
 the same collision-aware planning path serves `left_arm` and `right_arm`. The
-two base frames are related by a measured transform (`config.yaml`,
-`T_base_right_to_base_left`, 2026-07-14), which lets both arms be fenced in one
-coordinate system rather than two.
+controller bases use independently measured bridges into the same MoveIt frame
+(`safety_profiles.json`, `left_arm_model`); the older `config.yaml` camera
+calibration does not describe these controller-base frames. Fence geometry
+stays authored in the right controller base, and left-arm TCP points are
+converted into that frame before the same checks run.
 
 ## Running the tests
 

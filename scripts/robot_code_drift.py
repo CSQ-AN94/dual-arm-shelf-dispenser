@@ -37,6 +37,9 @@ TRACKED = [
     "shelf_dispenser/mtc_execution.py",
     "shelf_dispenser/mtc_pick_contract.py",
     "shelf_dispenser/planner.py",
+    "shelf_dispenser/ros/plan_once.py",
+    "shelf_dispenser/ros/scene_helpers.py",
+    "shelf_dispenser/ros/validate_path.py",
     "shelf_dispenser/arm.py",
     "shelf_dispenser/safe_planner.py",
     "shelf_dispenser/safety.py",
@@ -53,6 +56,8 @@ TRACKED = [
     "shelf_dispenser/left_arm.py",
     "scripts/normalize_left_arm.py",
     "scripts/normalize_to_grasp_start.py",
+    "scripts/measure_left_arm_bridge.py",
+    "scripts/solve_left_arm_model.py",
     "scripts/run_cross_layer_cycle.sh",
 ]
 

@@ -85,6 +85,20 @@ def test_the_fence_conversion_is_consistent_with_both_bridges():
     assert via_conversion == pytest.approx(via_left_bridge, abs=1e-9)
 
 
+def test_left_view_moves_robot_poses_but_not_the_authored_shelf():
+    profile = _profile()
+    left = left_view(profile)
+
+    assert left.moveit_collision_boxes() == pytest.approx(
+        profile.moveit_collision_boxes()
+    )
+    assert left.moveit_workspace() == pytest.approx(profile.moveit_workspace())
+    assert not np.allclose(
+        left.pose_to_moveit(np.eye(4)),
+        profile.pose_to_moveit(np.eye(4)),
+    )
+
+
 def test_joint_signs_are_validated_not_trusted():
     profile = _profile()
     assert left_joint_signs(profile) == (1,) * 7

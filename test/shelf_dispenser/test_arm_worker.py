@@ -221,3 +221,39 @@ def test_a_none_profile_means_the_caller_runs_the_fence():
     split = proxy_source[proxy_source.index("def validate_planned_joints(") :]
     assert "if safety_profile is not None:" in split
     assert "assert_tcp_path" in split
+
+
+def test_parent_fence_checks_the_same_dense_path_as_the_worker():
+    proxy = ArmProxy.__new__(ArmProxy)
+    tcp_queries = []
+
+    def call(method, *args, **kwargs):
+        if method == "validate_planned_joints":
+            assert args[2] is None
+            assert kwargs["start_joints_deg"] == [0.0] * 7
+            return 2
+        if method == "tcp_from_joints":
+            tcp_queries.append(list(args[0]))
+            pose = np.eye(4)
+            pose[0, 3] = args[0][0]
+            return pose
+        raise AssertionError(method)
+
+    proxy._call = call
+
+    class Fence:
+        points = None
+
+        @classmethod
+        def assert_tcp_path(cls, points):
+            cls.points = points
+
+    proxy.validate_planned_joints(
+        [[2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
+        1.0,
+        Fence,
+        start_joints_deg=[0.0] * 7,
+    )
+
+    assert [point[0] for point in tcp_queries] == [1.0, 2.0]
+    assert [point[0] for point in Fence.points] == [1.0, 2.0]

@@ -16,7 +16,10 @@ disagree about something other than a fixed frame, most likely joint sign or
 order, and no single transform would fix that.
 
     python scripts/measure_left_arm_bridge.py              # 只测量并报告
-    python scripts/measure_left_arm_bridge.py --write      # 通过后写入 profile
+
+Use ``solve_left_arm_model.py --write`` to solve and persist the complete
+bridge/tool model.  A bridge-only result is diagnostic evidence, not a model
+that may be written into the execution profile.
 """
 
 from __future__ import annotations
@@ -26,7 +29,6 @@ import json
 import logging
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -47,6 +49,7 @@ LOG = logging.getLogger("measure_left_arm_bridge")
 # contract: a bridge that only just passes the gate it feeds is not a bridge.
 MAX_POSITION_SPREAD_M = 0.005
 MAX_ORIENTATION_SPREAD_DEG = 0.5
+MIN_KINEMATIC_SAMPLES = 12
 
 
 def sample_joint_states(seed: int, count: int) -> list[list[float]]:
@@ -56,6 +59,10 @@ def sample_joint_states(seed: int, count: int) -> list[list[float]]:
     reachable-with-the-shelf-there.  Spread matters: poses clustered together
     would make a wrong bridge look consistent.
     """
+    if isinstance(count, bool) or int(count) < MIN_KINEMATIC_SAMPLES:
+        raise SafetyAbort(
+            f"左臂运动学标定至少需要 {MIN_KINEMATIC_SAMPLES} 个分散样本"
+        )
     rng = np.random.default_rng(seed)
     # Conservative interior of an RM75's travel, in degrees.
     spans = [(-150, 150), (-120, 120), (-150, 150), (-120, 120), (-150, 150),
@@ -134,13 +141,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--samples", type=int, default=12)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument(
-        "--write",
-        action="store_true",
-        help="Write T_moveit_from_left_profile into the profile if it passes",
-    )
     cli = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO)
+    states = sample_joint_states(cli.seed, cli.samples)
     run_dir = Path(cli.output_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -154,7 +157,6 @@ def main(argv: list[str] | None = None) -> int:
         raise SafetyAbort("profile 缺少 left_tool_mount_calibration")
     link7_to_flange, _ = left_tool.require_transforms()
 
-    states = sample_joint_states(cli.seed, cli.samples)
     left = open_left_arm(cfg, params, profile, take_control=False)
     moveit = MoveItPlanner(project_root=ROOT, run_dir=run_dir)
     try:
@@ -204,36 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     print("\n✓ 各样本一致，是一个固定刚体变换。")
-    if not cli.write:
-        print("加 --write 写入 profile。")
-        return 0
-
-    path = Path(cli.safety_config)
-    data = json.loads(path.read_text(encoding="utf-8"))
-    shelf = data["profiles"]["shelf_template"]
-    shelf["T_moveit_from_left_profile"] = [
-        [float(v) for v in row] for row in bridge
-    ]
-    shelf["left_bridge_evidence"] = {
-        "measured_at_utc": datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z"),
-        "samples": len(estimates),
-        "seed": cli.seed,
-        "max_position_spread_m": position_spread,
-        "max_orientation_spread_deg": orientation_spread,
-        "method": (
-            "Both sides are forward kinematics at the same joint states, so no "
-            "motion was commanded: Bridge = moveit_l_link7(q) @ inv(sdk_link7(q)), "
-            "averaged over the samples, with the spread between per-sample "
-            "estimates reported as the error bar."
-        ),
-    }
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    print(f"已写入 {path}")
+    print("该工具只报告桥接诊断；完整模型写入请使用 solve_left_arm_model.py --write。")
     return 0
 
 

@@ -140,6 +140,45 @@ def test_moveit_request_records_link7_vertical_path_floor(
     assert request["minimum_link7_z"] == -0.25
 
 
+def test_exact_path_recheck_maps_the_planned_arm_back_to_moveit(
+    tmp_path, monkeypatch
+):
+    planner = _planner(tmp_path)
+    monkeypatch.setattr(
+        planner,
+        "_run_json_helper",
+        lambda **_: {
+            "success": True,
+            "checked_states": 1,
+            "world_collision_ids": [],
+            "attached_object_ids": [],
+        },
+    )
+
+    planner.validate_exact_path(
+        name="left_probe",
+        planning_group="left_arm",
+        joint_signs=[1, -1, 1, -1, 1, -1, 1],
+        start_left_joints_deg=[0.0] * 7,
+        points_deg=[[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]],
+        obstacles=[],
+        boxes=[],
+        planning_frame="platform_base_link",
+        tool_guard={},
+        voxel_size=0.05,
+    )
+
+    request = __import__("json").loads(
+        (tmp_path / "left_probe_validation_request.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert request["planning_group"] == "left_arm"
+    assert request["points_deg"] == [
+        [1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0]
+    ]
+
+
 def test_moveit_trajectory_columns_are_reordered_by_joint_names(
     tmp_path, monkeypatch
 ):

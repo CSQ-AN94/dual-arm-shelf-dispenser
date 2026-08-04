@@ -18,19 +18,26 @@ RIGHT = [
     -114.7239990234,
     -9.3540000916,
 ]
-# Re-taught 2026-08-03.  The specific values carry no geometry: the left arm
-# only has to sit somewhere known and fixed so every plan can build its
-# collision scene against it.  The 2026-08-02 values were simply where the arm
-# happened to be that day, and once it was moved on site they were no longer
-# reachable -- this package has no left-arm execution path.
+# Hand-placed by the operator and vetted before it was written, which none of
+# its predecessors were.  Every earlier value was simply where the arm happened
+# to be when someone read it: the 08-02 one had J6 at 126.406 against a 128
+# limit, so it sat 1.6 degrees from the edge and inside the 3 degree margin, and
+# no plan toward it could ever succeed.  Nobody found out until the left arm was
+# planned for the first time, weeks later.
+#
+# Four checks now, all of which that value would have failed or barely passed:
+# 0.004 degrees of drift over 12 seconds, 8.5 degrees of joint-limit margin at
+# worst, 0.441 m of clearance from the corridor edge (the old pose was pinned
+# against it, which is why every path out of it left the fence immediately), and
+# MoveIt self-collision.
 LEFT = [
-    -45.889,
-    -110.092,
-    50.921,
-    -82.368,
-    11.999,
-    126.406,
-    -0.922,
+    -51.296001,
+    -115.362,
+    50.894001,
+    -72.280998,
+    13.749,
+    119.490997,
+    12.696,
 ]
 
 

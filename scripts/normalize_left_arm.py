@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             ],
             obstacle_points=[],
-            collision_boxes=[],
+            collision_boxes=left_profile.moveit_collision_boxes(),
         )
         points = [
             list(map(float, point)) for point in verified.trajectory["points_deg"]
@@ -163,14 +163,14 @@ def main(argv: list[str] | None = None) -> int:
         # view, which only the parent has.
         left.validate_planned_joints(
             points,
-            params.max_joint_step_deg,
+            params.planned_joint_step_deg,
             left_profile,
             start_joints_deg=current,
         )
         left.execute_planned_joints(
             points,
             cli.speed,
-            params.max_joint_step_deg,
+            params.planned_joint_step_deg,
             expected_start_joints_deg=current,
         )
         reached = list(left.joints_deg())

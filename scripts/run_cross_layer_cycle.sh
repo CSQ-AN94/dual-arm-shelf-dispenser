@@ -36,13 +36,79 @@ rm -rf "$O"; mkdir -p "$O"; touch "$MARKER"
 say(){ echo; echo "########## $* ##########"; }
 fail(){ echo "  失败: $(grep -E '拒绝|SafetyAbort' "$1" | tail -1)"; tail -4 "$1"; echo CYCLE_DONE; exit 1; }
 
-say "阶段 1  归位到抓取起点"
+# Own the read-only joint-state + move_group stack this workflow depends on.
+# The MTC planner launch below deliberately starts only the planner node.
+STACK_PID=""
+cleanup_stack(){
+  [ -n "$STACK_PID" ] || return 0
+  if kill -0 "$STACK_PID" 2>/dev/null; then
+    kill -INT "$STACK_PID" 2>/dev/null || true
+    for _ in {1..24}; do
+      kill -0 "$STACK_PID" 2>/dev/null || break
+      sleep 0.5
+    done
+    kill -TERM "$STACK_PID" 2>/dev/null || true
+  fi
+  wait "$STACK_PID" 2>/dev/null || true
+  STACK_PID=""
+}
+trap cleanup_stack EXIT
+
+start_stack(){
+  STACK_LABEL=$1
+  say "启动只规划 MoveIt 栈（$STACK_LABEL）"
+  cd "$G/mtc_ws" && source install/setup.bash
+  BRIDGE_STATUS="$O/bridge_status_$STACK_LABEL.json"
+  STACK_LOG="$O/moveit_stack_$STACK_LABEL.log"
+  rm -f "$BRIDGE_STATUS"
+  ros2 launch grabber_robot_state_bridge live_state_plan_only.launch.py \
+    bridge_status_file:="$BRIDGE_STATUS" > "$STACK_LOG" 2>&1 &
+  STACK_PID=$!
+  STACK_READY=0
+  for _ in {1..70}; do
+    kill -0 "$STACK_PID" 2>/dev/null || break
+    if [ -f "$BRIDGE_STATUS" ] && \
+        "$PY" -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("read_only") is True and d.get("publishing") is True and d.get("lift_motion_ready") is True and int(d.get("published", 0)) >= 3 else 1)' "$BRIDGE_STATUS" 2>/dev/null && \
+        ros2 service list 2>/dev/null | grep -qx '/get_planning_scene'; then
+      STACK_READY=1
+      break
+    fi
+    sleep 0.5
+  done
+  if [ "$STACK_READY" != 1 ]; then
+    echo "拒绝: 实时双臂/升降 joint-state + move_group 在 35 秒内未就绪" >&2
+    tail -20 "$STACK_LOG" >&2
+    exit 1
+  fi
+  echo "  OK"
+}
+
+say "阶段 0  右臂和升降预归位（左臂保持当前姿态进入碰撞场）"
+cd "$G"
+if $PY scripts/normalize_to_grasp_start.py --right-and-lift-only \
+    --execute > "$O/norm_right_lift.log" 2>&1; then
+  echo "  OK"
+else
+  fail "$O/norm_right_lift.log"
+fi
+
+say "阶段 0.5  左臂在标定升降高度归位"
+cd "$G"
+if $PY scripts/normalize_left_arm.py --execute > "$O/norm_left.log" 2>&1; then
+  echo "  OK"
+else
+  fail "$O/norm_left.log"
+fi
+
+say "阶段 1  双臂和升降原子门禁"
 cd "$G"
 if $PY scripts/normalize_to_grasp_start.py --execute > "$O/norm.log" 2>&1; then
   echo "  OK"
 else
   fail "$O/norm.log"
 fi
+
+start_stack pick
 
 say "阶段 2  抓取（标定+采集+规划+执行 都在同一次尝试内）"
 PICKED=0
@@ -74,6 +140,7 @@ for i in 1 2 3 4 5 6; do
   fi
 done
 [ "$PICKED" = 1 ] || { echo "抓取阶段失败"; echo CYCLE_DONE; exit 1; }
+cleanup_stack
 
 say "阶段 2.5  持瓶回收拢位（升降契约要求的姿态，并把到位证据写回 pick 记录）"
 cd "$G"
@@ -92,6 +159,8 @@ if $PY scripts/execute_mtc_lift_transfer.py "$O/pick_record.json" \
 else
   fail "$O/lift.log"
 fi
+
+start_stack place
 
 say "阶段 4  放置（空位+场景+规划+执行 都在同一次尝试内）"
 for i in 1 2 3 4 5; do

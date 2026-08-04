@@ -29,7 +29,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from .core import SafetyAbort
+from .core import SafetyAbort, interpolate_joint_path
 
 # Methods the parent may invoke on a worker-owned arm.  Read-only queries and
 # the taught-pose motion path; anything that would need a live camera, a scene
@@ -275,21 +275,29 @@ class ArmProxy:
         frame this arm reports in.  So the worker gets the joint half and the
         parent runs the fence on the TCP points it asks the worker for.
         """
+        measured_start = (
+            self.joints_deg()
+            if start_joints_deg is None
+            else list(start_joints_deg)
+        )
         count = self._call(
             "validate_planned_joints",
             points_deg,
             max_step_deg,
             None,
-            start_joints_deg=start_joints_deg,
+            start_joints_deg=measured_start,
             joint_limit_margin_deg=joint_limit_margin_deg,
         )
         if safety_profile is not None:
+            dense = interpolate_joint_path(
+                measured_start, points_deg, max_step_deg
+            )
             safety_profile.assert_tcp_path(
                 [
                     np.asarray(self._call("tcp_from_joints", point), dtype=float)[
                         :3, 3
                     ].tolist()
-                    for point in points_deg
+                    for point in dense
                 ]
             )
         return count

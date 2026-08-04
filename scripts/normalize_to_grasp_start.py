@@ -84,6 +84,15 @@ def main() -> int:
         help="Actually move the right arm and lift; otherwise report only",
     )
     parser.add_argument(
+        "--right-and-lift-only",
+        action="store_true",
+        help=(
+            "Prepare the right arm and calibrated lift height before the "
+            "separate left-arm normalizer runs; skip only the final atomic "
+            "dual-arm gate"
+        ),
+    )
+    parser.add_argument(
         "--pick-record",
         type=Path,
         help=(
@@ -106,6 +115,8 @@ def main() -> int:
         ),
     )
     cli = parser.parse_args()
+    if cli.right_and_lift_only and cli.target != "grasp_start":
+        parser.error("--right-and-lift-only 只适用于 grasp_start")
     cli.safety_profile = "shelf_template"
     Path(cli.output_dir).mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO)
@@ -214,7 +225,20 @@ def main() -> int:
                 int(profile.grasp_start_lift_height_mm),
                 speed=demo.params.final_speed,
             )
-        demo.normalize_to_grasp_start()
+        right_error = demo.normalize_to_grasp_start()
+        if cli.right_and_lift_only:
+            settled_lift = lift.state()
+            settled_lift_error = abs(
+                int(settled_lift.height_mm)
+                - int(profile.grasp_start_lift_height_mm)
+            )
+            if right_error > tolerance or settled_lift_error > LIFT_TOLERANCE_MM:
+                raise SafetyAbort(
+                    "右臂/升降预归位未到位: "
+                    f"右臂={right_error:.2f}°，升降={settled_lift_error} mm"
+                )
+            print("\n右臂和升降已到位；左臂仍须单独规划，尚未通过双臂原子门禁。")
+            return 0
         # The gate the executor will apply, run here so a partial normalization
         # cannot be mistaken for a ready robot.
         profile.assert_grasp_start(

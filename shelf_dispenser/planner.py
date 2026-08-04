@@ -214,11 +214,10 @@ class MoveItPlanner:
         output_path = self.run_dir / f"{name}_plan.json"
         if planning_group not in {"right_arm", "left_arm"}:
             raise SafetyAbort(f"未知规划组: {planning_group!r}")
-        # The left arm's SDK and the URDF disagree about the direction of
-        # joints 2, 4 and 6 -- measured, not guessed, and matching the URDF's
-        # own 3.1415 on l_joint7 that the right arm carries on joint1.  Map on
-        # the way in and back on the way out, so every caller and the SDK stay
-        # in one convention and only this boundary knows about the other.
+        # Keep the convention mapping at this boundary.  The current measured
+        # left-arm model uses all +1 signs; retaining the explicit map makes a
+        # future measured convention change symmetric on request and result,
+        # without teaching callers MoveIt's joint convention.
         signs = np.asarray(joint_signs or [1] * 7, dtype=float)
         if signs.shape != (7,) or not np.all(np.isin(signs, (1.0, -1.0))):
             raise SafetyAbort("joint_signs 必须是 7 个 ±1")
@@ -320,9 +319,13 @@ class MoveItPlanner:
         held_object: dict | None = None,
         voxel_size: float,
         planning_group: str = "right_arm",
+        joint_signs: Sequence[int] | None = None,
     ) -> dict:
         request_path = self.run_dir / f"{name}_validation_request.json"
         output_path = self.run_dir / f"{name}_validation.json"
+        signs = np.asarray(joint_signs or [1] * 7, dtype=float)
+        if signs.shape != (7,) or not np.all(np.isin(signs, (1.0, -1.0))):
+            raise SafetyAbort("joint_signs 必须是 7 个 ±1")
         request_path.write_text(
             json.dumps(
                 {
@@ -331,7 +334,8 @@ class MoveItPlanner:
                         map(float, start_left_joints_deg)
                     ),
                     "points_deg": [
-                        list(map(float, item)) for item in points_deg
+                        (signs * np.asarray(item, dtype=float)).tolist()
+                        for item in points_deg
                     ],
                     "obstacles": [
                         list(map(float, item)) for item in obstacles
@@ -378,16 +382,20 @@ class MoveItPlanner:
         name: str,
         object_id: str,
         planning_frame: str,
+        planning_group: str = "right_arm",
     ) -> dict:
         """Send an explicit REMOVE and verify live attached IDs afterwards."""
 
         request_path = self.run_dir / f"{name}_detach_request.json"
         output_path = self.run_dir / f"{name}_detach.json"
+        if planning_group not in {"right_arm", "left_arm"}:
+            raise SafetyAbort(f"未知规划组: {planning_group!r}")
+        prefix = "r" if planning_group == "right_arm" else "l"
         request_path.write_text(
             json.dumps(
                 {
                     "object_id": str(object_id),
-                    "link_name": "r_link7",
+                    "link_name": f"{prefix}_link7",
                     "planning_frame": str(planning_frame),
                 },
                 indent=2,

@@ -50,9 +50,9 @@ def left_view(profile: SafetyProfile) -> SafetyProfile:
     """The right arm's fence and planner, told how the left arm reports itself.
 
     Three constants separate the two, all measured together by
-    ``scripts/solve_left_arm_model.py`` (16 joint states, 0.583 mm / 0.108 deg):
+    ``scripts/solve_left_arm_model.py``:
 
-      * joints 2, 4 and 6 run the other way, applied in ``planner``;
+      * joint directions are checked explicitly at the MoveIt boundary;
       * a bridge from the left controller base to the MoveIt frame, used here;
       * a tool-side offset, already folded into the left arm's
         ``T_link7_controller_flange`` -- it multiplies from the right, which is
@@ -76,6 +76,9 @@ def left_view(profile: SafetyProfile) -> SafetyProfile:
         profile,
         name=f"{profile.name}__left",
         T_moveit_from_profile=left_bridge,
+        # Fence geometry stays in the right controller-base frame in which it
+        # was measured.  Only left-arm SDK poses use left_bridge.
+        T_moveit_from_fence=right_bridge,
         tool_mount_calibration=profile.left_tool_mount_calibration,
         # Left controller base -> right controller base, via the MoveIt frame
         # both were measured against.
@@ -106,8 +109,8 @@ def open_left_arm(cfg, params, profile: SafetyProfile, *, take_control: bool):
     The two grippers being the same part does not make the right arm's number
     right for the left one -- that number is nominal, with its residual absorbed
     by a stop-short distance tuned on the right arm against a real shelf.  Using
-    it here would put a wrong TCP into every fence check silently.  Measure the
-    left tool with ``scripts/measure_left_tool_mount.py``, and this opens.
+    it here would put a wrong TCP into every fence check silently.  Solve the
+    left bridge/tool model with ``scripts/solve_left_arm_model.py --write``.
     """
     from .arm_worker import ArmProxy
 
@@ -117,7 +120,7 @@ def open_left_arm(cfg, params, profile: SafetyProfile, *, take_control: bool):
             f"profile {profile.name} 没有左臂工具标定；"
             "右臂那份的 evidence_id 明确写着不得迁移到左臂"
             "（它是 nominal，残差靠右臂实测的 grasp_stop_short_m 吸收）。"
-            "先跑 scripts/measure_left_tool_mount.py 实测"
+            "先跑 scripts/solve_left_arm_model.py --write 实测"
         )
     _, flange_to_tcp = left_calibration.require_transforms()
     # The session is configured with the nominal chain, not the folded one.
