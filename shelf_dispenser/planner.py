@@ -319,13 +319,15 @@ class MoveItPlanner:
         tool_guard: dict,
         held_object: dict | None = None,
         voxel_size: float,
+        planning_group: str = "right_arm",
     ) -> dict:
         request_path = self.run_dir / f"{name}_validation_request.json"
         output_path = self.run_dir / f"{name}_validation.json"
         request_path.write_text(
             json.dumps(
                 {
-                    "start_left_joints_deg": list(
+                    "planning_group": planning_group,
+                    "start_other_joints_deg": list(
                         map(float, start_left_joints_deg)
                     ),
                     "points_deg": [

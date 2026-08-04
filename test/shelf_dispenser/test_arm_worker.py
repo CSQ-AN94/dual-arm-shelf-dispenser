@@ -198,3 +198,26 @@ def test_sdk_banner_on_stdout_does_not_break_the_protocol():
     finally:
         if proxy._process.poll() is None:
             proxy._process.kill()
+
+
+def test_a_none_profile_means_the_caller_runs_the_fence():
+    """Regression: the worker crashed on None instead of skipping the fence.
+
+    ArmProxy splits validate_planned_joints -- joint limits in the worker that
+    owns them, fence in the parent that knows the arm's frame -- so the worker
+    is handed None on purpose.  It must mean "not here", not "not at all".
+    """
+    source = (
+        Path(__file__).resolve().parents[2] / "shelf_dispenser" / "arm.py"
+    ).read_text(encoding="utf-8")
+    assert "if safety_profile is None:" in source
+    assert source.index("if safety_profile is None:") < source.index(
+        "return safety_profile.assert_tcp_path(tcp_points)"
+    )
+
+    proxy_source = (
+        Path(__file__).resolve().parents[2] / "shelf_dispenser" / "arm_worker.py"
+    ).read_text(encoding="utf-8")
+    split = proxy_source[proxy_source.index("def validate_planned_joints(") :]
+    assert "if safety_profile is not None:" in split
+    assert "assert_tcp_path" in split

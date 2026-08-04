@@ -991,6 +991,13 @@ class RobotSession:
                     f"{upper[joint] - joint_limit_margin_deg:.2f}]°，"
                     f"起点={start[joint]:.2f}°"
                 )
+        if safety_profile is None:
+            # The joint half only.  A second arm runs in its own process and a
+            # SafetyProfile does not cross that boundary, so its fence is run
+            # by the parent, which is the side that knows the frame the arm
+            # reports in.  None here means "the caller is doing the fence",
+            # never "there is no fence".
+            return len(dense)
         tcp_points = [self.tcp_from_joints(joints)[:3, 3] for joints in dense]
         return safety_profile.assert_tcp_path(tcp_points)
 

@@ -96,3 +96,27 @@ def test_the_planner_is_given_the_left_tool_transform():
     source = ENTRY.read_text(encoding="utf-8")
     assert "link7_to_controller_flange=link7_to_flange" in source
     assert "left_tool_mount_calibration.require_transforms()" in source
+
+
+def test_the_dense_recheck_knows_which_arm_it_is_checking():
+    """Regression: it put the planned trajectory on r_joint* unconditionally.
+
+    Validating a left-arm trajectory therefore drove the *right* arm along the
+    left arm's path and parked the right arm's real position on the left arm's
+    joints.  Every point collided, index 0 first, and the contact list was full
+    of r_link pairs for a plan the right arm had no part in.
+    """
+    validate = (
+        ROOT / "shelf_dispenser" / "ros" / "validate_path.py"
+    ).read_text(encoding="utf-8")
+    assert "arm_names(group)" in validate
+    assert "request.group_name = group" in validate
+    assert 'request.group_name = "right_arm"' not in validate
+    assert "[*other_names, *planned_names]" in validate
+
+    planner = (ROOT / "shelf_dispenser" / "planner.py").read_text(encoding="utf-8")
+    assert '"planning_group": planning_group' in planner
+
+    safe = (ROOT / "shelf_dispenser" / "safe_planner.py").read_text(encoding="utf-8")
+    postcheck = safe[safe.index("validate_exact_path(") :]
+    assert "planning_group=self.planning_group" in postcheck[:400]
