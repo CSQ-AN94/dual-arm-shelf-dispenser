@@ -267,7 +267,7 @@
       "tcp_workspace": {
         "id": "shelf_total_workspace",
         "min": [
-          -0.65,
+          -0.8045,
           -0.3,
           -0.75
         ],
@@ -281,7 +281,7 @@
         {
           "id": "shelf_home_corridor",
           "min": [
-            -0.6,
+            -0.7245,
             -0.27,
             -0.7
           ],
@@ -294,7 +294,7 @@
         {
           "id": "shelf_bin_task_volume",
           "min": [
-            -0.45,
+            -0.6245,
             0.25,
             -0.2
           ],
