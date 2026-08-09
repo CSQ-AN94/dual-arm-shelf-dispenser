@@ -126,6 +126,9 @@ class _Robot:
     def assert_arm_healthy(self):
         return {}
 
+    def recover_transient_joint_frame_loss(self):
+        return []
+
     def current_tcp(self):
         return np.eye(4)
 
@@ -195,19 +198,6 @@ class _Lift:
         self.moves.append((height, speed))
         self.height = height
         return self.state()
-
-
-class _Chassis:
-    def state(self):
-        return SimpleNamespace(
-            x_m=1.0,
-            y_m=2.0,
-            yaw_rad=0.3,
-            linear_mps=0.0,
-            angular_radps=0.0,
-            control_mode="kAuto",
-            robot_state="kIdle",
-        )
 
 
 def test_pick_contract_and_temporal_gripper_gates():
@@ -351,7 +341,11 @@ def _execution_scenario(trajectory: dict) -> dict:
         ],
         # A width the installed RMG24 can actually span; the executor refuses
         # anything at or beyond gripper_max_opening_m.
-        "bottle": {"id": "bottle", "radius_m": 0.025},
+        "bottle": {
+            "id": "bottle",
+            "radius_m": 0.025,
+            "pose": {"xyz": [0.0, 0.0, 0.055]},
+        },
         "source_grasp_pose": {
             "xyz": [0.0, 0.0, 0.0],
             "quat_xyzw": [0.0, 0.0, 0.0, 1.0],
@@ -399,9 +393,10 @@ def test_execution_bundle_binds_plan_only_artifacts():
         left_reader=_Left(summary["left_start_deg"]),
         lift_state=SimpleNamespace(height_mm=718, mode=0),
         safety_profile=SimpleNamespace(T_moveit_from_profile=np.eye(4)),
-        empty_close_pos=394,
+        empty_close_pos=0,
         allow_sdk_retiming=True,
     )
+    assert robot.empty_close_pos == 0
     assert robot.events == [
         ("validate", 6),
         "open",
@@ -410,6 +405,15 @@ def test_execution_bundle_binds_plan_only_artifacts():
         ("move", 2),
     ]
     assert completed["final_right_joints_deg"] == [15.0] * 7
+    assert completed["empty_close_pos"] == 0
+    assert completed["bottle_center_in_tcp_m"] == pytest.approx(
+        [0.0, 0.0, 0.055]
+    )
+
+    stale_template = deepcopy(scenario)
+    stale_template["source_grasp_candidates"][0]["pose"]["xyz"][2] += 0.05
+    with pytest.raises(SafetyAbort, match="示教绝对坐标"):
+        validate_execution_bundle(result, trajectory, stale_template)
 
 
 def test_mtc_execution_refuses_to_drop_timing_without_explicit_acknowledgement():
@@ -561,6 +565,7 @@ def test_pick_executor_rejects_vertical_fingers_before_opening():
     result = _execution_result(trajectory)
     scenario = _execution_scenario(trajectory)
     scenario["source_approach_direction"] = [0.0, -1.0, 0.0]
+    scenario["bottle"]["pose"]["xyz"] = [0.0, -0.055, 0.0]
     scenario["source_grasp_candidates"][0]["pose"]["quat_xyzw"] = [
         2**-0.5,
         0.0,
@@ -642,12 +647,35 @@ def test_lift_transfer_reads_the_taught_pose_from_the_profile():
         robot=robot,
         left_reader=_Left(list(range(21, 28))),
         lift=lift,
-        chassis=_Chassis(),
     )
     assert lift.moves == [(250, 30)]
     assert completed["target_height_mm"] == 250
     assert completed["source_height_mm"] == 647
     assert completed["taught_pose_profile"] == "shelf_template"
+
+
+def test_lift_transfer_is_independent_of_chassis():
+    """A vertical lift move must not initialize or wait for the idle chassis."""
+    lift = _Lift(647)
+    completed = execute_lift_transfer(
+        {
+            "schema_version": "grabber.mtc_execution.v1",
+            "mode": "pick",
+            "completion": {
+                "final_right_joints_deg": [5.0] * 7,
+                "lift_start_mm": 647,
+                "empty_close_pos": 394,
+            },
+        },
+        profile=_Profile(),
+        target_height_mm=250,
+        robot=_Robot([5.0] * 7, holding=True),
+        left_reader=_Left(list(range(21, 28))),
+        lift=lift,
+    )
+
+    assert lift.moves == [(250, 30)]
+    assert completed["target_height_mm"] == 250
 
 
 def test_lift_transfer_refuses_a_target_that_is_not_below_the_start():
@@ -669,7 +697,6 @@ def test_lift_transfer_refuses_a_target_that_is_not_below_the_start():
                 robot=_Robot([5.0] * 7, holding=True),
                 left_reader=_Left(list(range(21, 28))),
                 lift=_Lift(647),
-                chassis=_Chassis(),
             )
 
 
@@ -694,24 +721,69 @@ def test_lift_transfer_accepts_a_recorded_post_pick_tuck():
             robot=_Robot([5.0] * 7, holding=True),
             left_reader=_Left(list(range(21, 28))),
             lift=lift or _Lift(647),
-            chassis=_Chassis(),
         )
 
-    with pytest.raises(SafetyAbort, match="抓取起点"):
-        run()
+    # Since 2026-08-06 the recorded endpoint is advisory: a pick record whose
+    # trajectory ends on the shelf branch no longer refuses the descent, it is
+    # written down.  The live arm is what still gates (see the test below).
+    stale = run()
+    assert stale["advisory"]["recorded_endpoint_error_deg"] == pytest.approx(125.0)
 
     completion["post_pick_tuck"] = {
         "right_joints_deg": [5.0] * 7,
         "max_error_deg": 0.18,
     }
     lift = _Lift(647)
-    run(lift)
+    tucked = run(lift)
     assert lift.moves == [(250, 30)]
+    assert tucked["advisory"]["recorded_endpoint_error_deg"] == pytest.approx(0.0)
 
-    # A tuck stamp that disagrees with the taught pose is still refused.
-    completion["post_pick_tuck"]["right_joints_deg"] = [40.0] * 7
-    with pytest.raises(SafetyAbort, match="抓取起点"):
-        run()
+
+def test_lift_still_refuses_to_descend_with_the_arm_off_the_tuck():
+    """The one gate kept: descending 397 mm drags a shelf-branch arm through a panel."""
+    record = {
+        "schema_version": "grabber.mtc_execution.v1",
+        "mode": "pick",
+        "completion": {
+            "post_pick_tuck": {"right_joints_deg": [5.0] * 7},
+            "lift_start_mm": 647,
+            "empty_close_pos": 394,
+        },
+    }
+    lift = _Lift(647)
+    with pytest.raises(SafetyAbort, match="收拢"):
+        execute_lift_transfer(
+            record,
+            profile=_Profile(),
+            target_height_mm=250,
+            robot=_Robot([130.0] * 7, holding=True),  # still out on the shelf
+            left_reader=_Left(list(range(21, 28))),
+            lift=lift,
+        )
+    assert lift.moves == []
+
+
+def test_lift_transfer_can_resume_after_lift_reached_target_before_record_write():
+    lift = _Lift(250)
+    completed = execute_lift_transfer(
+        {
+            "schema_version": "grabber.mtc_execution.v1",
+            "mode": "pick",
+            "completion": {
+                "final_right_joints_deg": [5.0] * 7,
+                "lift_start_mm": 647,
+                "empty_close_pos": 394,
+            },
+        },
+        profile=_Profile(),
+        target_height_mm=250,
+        robot=_Robot([5.0] * 7, holding=True),
+        left_reader=_Left(list(range(21, 28))),
+        lift=lift,
+    )
+
+    assert lift.moves == []
+    assert completed["resumed_at_target"] is True
 
 
 def test_gripper_calibration_record_must_be_fresh(tmp_path):

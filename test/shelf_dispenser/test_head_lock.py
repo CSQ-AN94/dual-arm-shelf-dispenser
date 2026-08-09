@@ -109,6 +109,62 @@ def test_direct_angle_read_ignores_missing_fallback_device(monkeypatch):
     }
 
 
+def test_restore_uses_absolute_target_instead_of_fixed_step_buttons(monkeypatch):
+    class FakeSocket:
+        def close(self):
+            pass
+
+    readings = iter(
+        [
+            {"angle1": 400, "angle2": 487},
+            {"angle1": 400, "angle2": 516},
+        ]
+    )
+    absolute_writes = []
+    monkeypatch.setattr(head_lock, "_open_angle_socket", FakeSocket)
+    monkeypatch.setattr(
+        head_lock,
+        "_wait_fresh_angle",
+        lambda _sock, _patience: next(readings),
+    )
+    monkeypatch.setattr(
+        head_lock,
+        "_set_absolute_reference",
+        lambda: absolute_writes.append(True) or None,
+    )
+
+    result = head_lock.restore_reference(max_steps=2, allow_restart=False)
+
+    assert result["ok"]
+    assert absolute_writes == [True]
+
+
+def test_absolute_writer_resumes_vendor_service_after_write_error(monkeypatch):
+    signals = []
+    closed = []
+    monkeypatch.setattr(
+        head_lock.os,
+        "kill",
+        lambda pid, sig: signals.append((pid, sig)),
+    )
+    monkeypatch.setattr(head_lock.os, "open", lambda *_args: 42)
+    monkeypatch.setattr(
+        head_lock.os,
+        "write",
+        lambda *_args: (_ for _ in ()).throw(OSError("serial failed")),
+    )
+    monkeypatch.setattr(head_lock.os, "close", lambda fd: closed.append(fd))
+
+    failure = head_lock._write_absolute_reference(5829, Path("/proc/5829/fd/5"))
+
+    assert "serial failed" in failure
+    assert closed == [42]
+    assert signals == [
+        (5829, head_lock.signal.SIGSTOP),
+        (5829, head_lock.signal.SIGCONT),
+    ]
+
+
 def _make_demo(*, execute):
     demo = demo_module.RunOrchestrator.__new__(demo_module.RunOrchestrator)
     demo.args = type("Args", (), {"execute": execute})()

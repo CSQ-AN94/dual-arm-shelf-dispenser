@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 import json
 import logging
@@ -20,8 +20,10 @@ sys.path.insert(0, str(ROOT))
 from shelf_dispenser import head_lock
 from shelf_dispenser.core import SafetyAbort, pose_matrix
 from shelf_dispenser.delivery_table import observe_output_table
+from shelf_dispenser.live_arm import open_live_arm
 from shelf_dispenser.orchestrator import RunOrchestrator
 from shelf_dispenser.mobile_body import LiftSocketAdapter
+from shelf_dispenser.relative_place import product_geometry
 from shelf_dispenser.safety import load_safety_profile
 from shelf_dispenser.scene import (
     head_scene_points,
@@ -29,6 +31,9 @@ from shelf_dispenser.scene import (
     voxelize_scene_points,
 )
 from utils.config import load_config
+
+# Same band normalize_to_grasp_start accepts for the taught height.
+LIFT_TOLERANCE_MM = 5
 
 
 def _demo_args(cli) -> SimpleNamespace:
@@ -43,7 +48,6 @@ def _demo_args(cli) -> SimpleNamespace:
         confirm_before_grasp=False,
         place_back=False,
         return_home=False,
-        restore_teleop=False,
         resume_at_wrist=False,
         finish_from_current=False,
         target_product=None,
@@ -51,6 +55,29 @@ def _demo_args(cli) -> SimpleNamespace:
         port=cli.port,
         output_dir=str(cli.output.parent),
         observe_seconds=0.0,
+    )
+
+
+def _candidate_config(cli, demo) -> SimpleNamespace:
+    return SimpleNamespace(
+        table_roi_min=tuple(cli.roi_min),
+        table_roi_max=tuple(cli.roi_max),
+        table_height_bin_m=0.01,
+        table_inlier_band_m=0.012,
+        table_min_inliers=80,
+        table_frame_agreement_m=0.012,
+        table_edge_margin_m=0.08,
+        table_support_radius_m=0.07,
+        table_min_patch_points=4,
+        place_clearance_radius_m=cli.clearance_radius_m,
+        place_grid_m=0.04,
+        obstacle_min_height_m=0.025,
+        # Candidate clearance is an XY projection, so including geometry above
+        # the bottle turns the shelf ceiling into a fake bottle obstacle.  That
+        # pushed the 2026-08-08 target 65--82 mm behind every successful taught
+        # placement.  The full 3-D scene still goes to MoveIt afterwards.
+        obstacle_max_height_m=float(demo.params.held_bottle_height_m),
+        max_place_candidates=8,
     )
 
 
@@ -62,9 +89,19 @@ def main(argv: list[str] | None = None) -> int:
         default=str(ROOT / "shelf_dispenser" / "safety_profiles.json"),
     )
     parser.add_argument("--expected-lift-mm", type=int, required=True)
+    parser.add_argument(
+        "--product-code",
+        required=True,
+        choices=("P01", "P02", "P03", "P04", "P05", "P06"),
+    )
     parser.add_argument("--roi-min", type=float, nargs=3, required=True)
     parser.add_argument("--roi-max", type=float, nargs=3, required=True)
     parser.add_argument("--clearance-radius-m", type=float, default=0.10)
+    parser.add_argument(
+        "--camera",
+        choices=("head", "right_wrist", "left_wrist"),
+        default="head",
+    )
     parser.add_argument(
         "--operator-confirms-shelf-obstacles-complete",
         action="store_true",
@@ -94,14 +131,22 @@ def main(argv: list[str] | None = None) -> int:
     held.add_argument("--lift-execution-record", type=Path)
     held.add_argument("--pick-execution-record", type=Path)
     parser.add_argument("--held-right-joints-deg", type=float, nargs=7)
+    parser.add_argument(
+        "--held-bottle-center-in-tcp-m",
+        type=float,
+        nargs=3,
+        help="手工 held TCP 模式下，瓶心在 TCP 局部坐标中的三维偏移",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8884)
     cli = parser.parse_args(argv)
+    geometry = product_geometry(cli.product_code)
     if not 0.08 <= cli.clearance_radius_m <= 0.30:
         raise SafetyAbort("放置净空半径必须在 0.08..0.30 m")
 
     held_right_joints = cli.held_right_joints_deg
     held_pose_input = cli.held_tcp_base_rad
+    bottle_center_in_tcp_input = cli.held_bottle_center_in_tcp_m
     if cli.lift_execution_record:
         lift_record = json.loads(
             cli.lift_execution_record.read_text(encoding="utf-8")
@@ -119,10 +164,25 @@ def main(argv: list[str] | None = None) -> int:
         if age_s < 0.0 or age_s > 900.0:
             raise SafetyAbort(f"升降执行证据不新鲜: age={age_s:.1f}s")
         completion = lift_record["completion"]
-        if int(completion.get("target_height_mm", -1)) != cli.expected_lift_mm:
-            raise SafetyAbort("升降执行证据高度与空位采集高度不一致")
+        # The column stops where it stops.  2026-08-07: a completed descent
+        # reported 251 mm against an expected 250 and this refused the whole
+        # place stage over one millimetre, after the pick, the tuck and the
+        # descent had all succeeded.  Every other lift comparison in this repo
+        # already carries a tolerance (normalize_to_grasp_start's
+        # LIFT_TOLERANCE_MM, mobile_body's own 3 mm no-op band); this was the
+        # only exact one.
+        reached_mm = int(completion.get("target_height_mm", -1))
+        if abs(reached_mm - cli.expected_lift_mm) > LIFT_TOLERANCE_MM:
+            raise SafetyAbort(
+                "升降执行证据高度与空位采集高度不一致: "
+                f"实到 {reached_mm} mm, 期望 {cli.expected_lift_mm} mm, "
+                f"容差 {LIFT_TOLERANCE_MM} mm"
+            )
         held_pose_input = completion.get("held_tcp_base_xyz_rpy_rad")
         held_right_joints = completion.get("right_joints_deg")
+        bottle_center_in_tcp_input = completion.get(
+            "bottle_center_in_tcp_m"
+        )
     elif cli.pick_execution_record:
         pick_record = json.loads(
             cli.pick_execution_record.read_text(encoding="utf-8")
@@ -144,6 +204,9 @@ def main(argv: list[str] | None = None) -> int:
             raise SafetyAbort("pick 执行高度与空位采集高度不一致")
         held_pose_input = completion.get("final_tcp_base_xyz_rpy_rad")
         held_right_joints = completion.get("final_right_joints_deg")
+        bottle_center_in_tcp_input = completion.get(
+            "bottle_center_in_tcp_m"
+        )
     if not cli.no_held_object:
         if held_right_joints is None:
             raise SafetyAbort(
@@ -155,6 +218,15 @@ def main(argv: list[str] | None = None) -> int:
             or not np.all(np.isfinite(held_right_joints))
         ):
             raise SafetyAbort("held 右臂关节必须是七个有限数")
+        bottle_center_in_tcp = np.asarray(
+            bottle_center_in_tcp_input, dtype=float
+        )
+        if (
+            bottle_center_in_tcp.shape != (3,)
+            or not np.all(np.isfinite(bottle_center_in_tcp))
+            or float(np.linalg.norm(bottle_center_in_tcp)) > 0.25
+        ):
+            raise SafetyAbort("缺少抓取时记录的瓶心相对 TCP 偏移")
 
     lift = LiftSocketAdapter().state()
     if lift.mode != 0 or abs(lift.height_mm - cli.expected_lift_mm) > 5:
@@ -164,19 +236,66 @@ def main(argv: list[str] | None = None) -> int:
             f"expected={cli.expected_lift_mm} mm"
         )
     demo = RunOrchestrator(_demo_args(cli), load_config(cli.config))
+    # Model the shelf at the same resolution the pick does.  DemoParams
+    # defaults to 65 mm cells; capture_mtc_direct_pick_scene overrides that to
+    # 25 mm and this script never did, so the same shelf was carried at 25 mm
+    # for the pick and 65 mm for the place.  A 65 mm cube can present a corner
+    # 46 mm proud of the surface it came from, against 18 mm at 25 mm cells,
+    # and 2026-08-07 the place kept failing at target_preplace_ik with
+    # "eef in collision: head_rgbd_non_target - r_hand" -- the gripper meeting
+    # that overhang at a hover point the operator's own hand passes through.
+    demo.params = replace(
+        demo.params,
+        scene_voxel_m=0.025,
+        scene_max_voxels=3000,
+        held_bottle_height_m=geometry["height_m"],
+    )
+    profile = load_safety_profile(
+        cli.safety_config, "shelf_template", require_verified=True
+    )
     try:
-        demo._start_camera("head")
-        angle = head_lock.read_current_angle_direct()
-        if angle is None:
-            angle = head_lock.read_current_angle()
-        if not head_lock.is_at_reference(angle):
-            raise SafetyAbort(
-                f"固定头部不在标定基准角: current={angle}, "
-                f"expected={head_lock.HEAD_REFERENCE}"
+        if cli.camera != "head":
+            demo.model_asset_contract = demo._verify_detector_assets()
+        demo._start_camera(cli.camera)
+        if cli.camera == "head":
+            angle = head_lock.read_current_angle_direct()
+            if angle is None:
+                angle = head_lock.read_current_angle()
+            if not head_lock.is_at_reference(angle):
+                raise SafetyAbort(
+                    f"固定头部不在标定基准角: current={angle}, "
+                    f"expected={head_lock.HEAD_REFERENCE}"
+                )
+            T_base_camera = demo.T_base_head_camera
+        else:
+            angle = None
+            arm_id = (
+                "right_arm" if cli.camera == "right_wrist" else "left_arm"
             )
+            robot, _view = open_live_arm(
+                demo.cfg,
+                demo.params,
+                profile,
+                arm_id,
+                take_control=False,
+            )
+            try:
+                if cli.camera == "right_wrist":
+                    T_base_camera = (
+                        robot.current_flange()
+                        @ demo.cfg.calibration.wrist_extrinsic("right")
+                    )
+                else:
+                    T_base_camera = (
+                        demo.cfg.calibration.T_base_right_to_base_left
+                        @ robot.current_flange()
+                        @ demo.cfg.calibration.wrist_extrinsic("left")
+                    )
+            finally:
+                robot.close()
         K, _ = demo.camera.get_camera_intrinsics()
         if K is None:
-            raise SafetyAbort("固定头部相机内参不可用")
+            raise SafetyAbort(f"{cli.camera} 相机内参不可用")
         depths = demo._collect_fresh_depth_frames(
             demo.params.scene_samples, label="第二层放置场景"
         )
@@ -184,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
             head_scene_points(
                 depth,
                 K,
-                demo.T_base_head_camera,
+                T_base_camera,
                 demo.params,
                 min_depth_m=demo.params.head_min_depth_m,
                 max_depth_m=demo.params.head_max_depth_m,
@@ -192,9 +311,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             for depth in depths
         ]
-        profile = load_safety_profile(
-            cli.safety_config, "shelf_template", require_verified=True
-        )
         if cli.no_held_object:
             # Nothing is held and the arm is parked clear of the shelf, so the
             # depth frames are the shelf itself.  Subtracting an arm that is
@@ -212,8 +328,10 @@ def main(argv: list[str] | None = None) -> int:
                 raise SafetyAbort("held TCP 必须是有限的 xyz 米 + rpy 弧度")
             held_tcp = pose_matrix(held_pose)
             link7 = held_tcp @ np.linalg.inv(link7_to_flange @ flange_to_tcp)
-            held_center = held_tcp[:3, 3].copy()
-            held_center[2] -= 0.021
+            held_center = (
+                held_tcp[:3, 3]
+                + held_tcp[:3, :3] @ bottle_center_in_tcp
+            )
             segment = held_tcp[:3, 3] - link7[:3, 3]
             segment_length_sq = float(segment @ segment)
 
@@ -235,6 +353,21 @@ def main(argv: list[str] | None = None) -> int:
 
         if not cli.no_held_object:
             point_frames = [without_held(points) for points in point_frames]
+        # Keep the points the voxels came from.  Without them the only record
+        # of the scene is a 25 mm grid, and the one question that decides
+        # whether docs/rgbd_voxel_inflation.md is an algorithm bug or a camera
+        # bug -- does the arm clear the RAW measurements, or only the voxels? --
+        # cannot be asked after the fact.  A few hundred kB per capture.
+        raw_points_path = cli.output.with_suffix(".raw_points.npy")
+        np.save(
+            raw_points_path,
+            np.vstack(point_frames).astype(np.float32),
+        )
+        logging.info(
+            "原始深度点已保存 %s: %d 点（体素化之前）",
+            raw_points_path,
+            sum(len(points) for points in point_frames),
+        )
         center = (np.asarray(cli.roi_min) + np.asarray(cli.roi_max)) / 2.0
         voxels = union_scene_voxels(
             [
@@ -243,22 +376,7 @@ def main(argv: list[str] | None = None) -> int:
             ],
             demo.params,
         )
-        config = SimpleNamespace(
-            table_roi_min=tuple(cli.roi_min),
-            table_roi_max=tuple(cli.roi_max),
-            table_height_bin_m=0.01,
-            table_inlier_band_m=0.012,
-            table_min_inliers=80,
-            table_frame_agreement_m=0.012,
-            table_edge_margin_m=0.08,
-            table_support_radius_m=0.07,
-            table_min_patch_points=4,
-            place_clearance_radius_m=cli.clearance_radius_m,
-            place_grid_m=0.04,
-            obstacle_min_height_m=0.025,
-            obstacle_max_height_m=0.45,
-            max_place_candidates=8,
-        )
+        config = _candidate_config(cli, demo)
         observation = observe_output_table(
             point_frames, config, require_candidates=False
         )
@@ -294,17 +412,45 @@ def main(argv: list[str] | None = None) -> int:
                 config,
                 require_candidates=False,
             )
+        # Drop the support surface's own cells.  The panel is already a keepout
+        # box the place stage relaxes against (allow_final_support_contact names
+        # fence_shelf_bottom), but the same panel also arrives as RGB-D voxels
+        # under a different id, and nothing relaxes against those.  A 25 mm cell
+        # centred on the measured surface stands 12.5 mm proud of it, so a
+        # bottle resting where it belongs sinks into the duplicate and the plan
+        # is refused: 2026-08-07 measured exactly 12 such cells, all at
+        # z = -0.204 and 16 to 42 mm from the bottle axis, inside the target
+        # slot the detector had just called empty and well supported.
+        #
+        # Cut one cell above the fitted plane, which is the tallest a surface
+        # cell can be.  Anything genuinely standing there -- a neighbouring
+        # bottle is 217 mm, nine cells -- keeps everything above that.
+        surface_cut = observation.table_height_m + demo.params.scene_voxel_m
+        kept_voxels = [v for v in voxels if float(v[2]) > surface_cut]
+        logging.info(
+            "支撑面体素扣除 支撑面 %.3f m，切到 %.3f m：删 %d 个，保留 %d 个",
+            observation.table_height_m,
+            surface_cut,
+            len(voxels) - len(kept_voxels),
+            len(kept_voxels),
+        )
+        voxels = kept_voxels
         payload = {
             "schema_version": "grabber.empty_shelf_places.v1",
             "captured_at_utc": datetime.now(timezone.utc).isoformat(),
             "frame": "right_controller_base",
             "lift_height_mm": lift.height_mm,
             "head_angle": angle,
+            "capture_camera": cli.camera,
+            "product_code": geometry["product_code"],
             "held_tcp_base_xyz_rpy_rad": (
                 None if held_pose is None else held_pose.tolist()
             ),
             "held_right_joints_deg": (
                 None if cli.no_held_object else held_right_joints.tolist()
+            ),
+            "bottle_center_in_tcp_m": (
+                None if cli.no_held_object else bottle_center_in_tcp.tolist()
             ),
             # Which of the two occlusion regimes produced this map.  A map
             # taken empty-handed has no arm shadow in it at all; one taken

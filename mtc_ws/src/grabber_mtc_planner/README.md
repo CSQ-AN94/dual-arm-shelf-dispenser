@@ -328,6 +328,26 @@ Poses in the scenario are **TCP** poses. The full rigid
 is currently a `0.1682 m` translation along `+Z`, but the 4×4 representation
 preserves measured tool rotation when calibration supplies one.
 
+## When a pick-only plan blames the RGB-D voxels
+
+`earliest_failure_stage` names a stage, never a voxel, so "the gripper hit the
+point cloud" is a guess until something measures it. This does, offline and
+without ROS: it carries the CTAG2F90D collision boxes down the scenario's own
+approach line and reports every obstacle voxel that overlaps, plus the closest
+approach when nothing does.
+
+```bash
+python3 scripts/diagnose_gripper_voxel_contact.py /tmp/mtc_direct_pick.yaml \
+  --out /tmp/gripper_voxel_contact.json
+```
+
+Per contact it prints the voxel's coordinates, its distance to the grasp point
+and to the bottle axis, its height above the measured support, and the
+penetration on each gripper axis — so a wide-open-envelope problem
+(`opening` axis tight, voxel beside the bottle), a target-mask leak (voxel on
+the bottle axis) and a real shelf obstacle separate on evidence. It models the
+hand only: zero contacts means the hand is exonerated, not the whole arm.
+
 ## Offline checks
 
 ```bash

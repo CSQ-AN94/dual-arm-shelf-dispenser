@@ -16,6 +16,7 @@ from shelf_dispenser.shelf_model import (
     adapt_profile_to_shelf,
     combine_shelf_fits,
     fit_shelf_face,
+    fitted_panel_mask,
 )
 
 TARGET = np.array([0.0, 0.55, -0.10])
@@ -83,7 +84,9 @@ def _profile(keepout_boxes, **overrides):
     return SafetyProfile(**values)
 
 
-@pytest.mark.parametrize("face", sorted(FACE_SPECS))
+@pytest.mark.parametrize(
+    "face", sorted(face for face, spec in FACE_SPECS.items() if spec.live_fit)
+)
 def test_fit_finds_the_face_plane_not_noise(face):
     plane_value = PLANE_VALUES[face]
     axis = FACE_SPECS[face].axis
@@ -105,6 +108,22 @@ def test_fit_returns_none_without_plane_support():
     rng = np.random.default_rng(3)
     sparse = rng.uniform([-1, -0.3, -1], [1, 1.5, 0.6], (30, 3))
     assert fit_shelf_face(sparse, TARGET, "shelf_bottom", DemoParams()) is None
+
+
+def test_fit_rejects_vertical_back_wall_slice_as_horizontal_bottom():
+    wall = _plane_cloud(1, 0.75, plane_points=4000, seed=11)
+
+    assert fit_shelf_face(wall, TARGET, "shelf_bottom", DemoParams()) is None
+
+
+def test_bottom_support_surface_is_not_raised_into_free_space():
+    points = _plane_cloud(2, -0.20)
+    points[:400, 2] = -0.20
+
+    fit = fit_shelf_face(points, TARGET, "shelf_bottom", DemoParams())
+
+    assert fit is not None
+    assert fit.plane_m == pytest.approx(-0.20, abs=1e-9)
 
 
 def _fit(face, *, plane_m, ranges=None, inliers=100):
@@ -170,7 +189,9 @@ def test_combine_shelf_fits_rejects_mixed_faces():
         )
 
 
-@pytest.mark.parametrize("face", sorted(FACE_SPECS))
+@pytest.mark.parametrize(
+    "face", sorted(face for face, spec in FACE_SPECS.items() if spec.live_fit)
+)
 def test_adapt_tracks_measured_bound_within_tolerance(face):
     params = DemoParams()
     old_plane = PLANE_VALUES[face]
@@ -204,6 +225,13 @@ def test_adapt_raises_when_recognized_face_has_no_measurement():
     profile = _profile((box,))
     with pytest.raises(SafetyAbort, match="找不到有足够支撑"):
         adapt_profile_to_shelf(profile, {}, params)
+
+
+def test_static_top_face_does_not_require_an_unobservable_live_fit():
+    box = _box_for("shelf_top", PLANE_VALUES["shelf_top"])
+    profile = _profile((box,))
+
+    assert adapt_profile_to_shelf(profile, {}, DemoParams()) is profile
 
 
 def test_adapt_in_plane_extent_only_grows_symmetric_axis():
@@ -257,3 +285,66 @@ def test_adapt_unrecognized_box_id_passes_through():
     assert any(b.id == "mystery_fixture" for b in adapted.keepout_boxes)
     mystery = next(b for b in adapted.keepout_boxes if b.id == "mystery_fixture")
     assert mystery == unknown
+
+
+def _bottom_fit(plane_m=-0.24):
+    """A measured shelf_bottom covering x in [-0.3, 0.3], y in [0.5, 0.9]."""
+    return FaceFit(
+        face="shelf_bottom",
+        plane_m=plane_m,
+        in_plane_ranges={0: (-0.3, 0.3), 1: (0.5, 0.9)},
+        inliers=1500,
+    )
+
+
+def test_fitted_panel_mask_drops_the_panel_and_keeps_what_stands_on_it():
+    fits = {"shelf_bottom": _bottom_fit()}
+    points = np.array(
+        [
+            [0.0, 0.7, -0.25],  # the panel itself, below the fitted bound
+            [0.0, 0.7, -0.241],  # a hair below the bound, still panel
+            [0.0, 0.7, -0.20],  # a bottle body standing on it
+            [0.0, 0.7, 0.05],  # higher still
+        ]
+    )
+    mask = fitted_panel_mask(points, fits)
+    assert mask.tolist() == [True, True, False, False]
+
+
+def test_fitted_panel_mask_leaves_points_the_fit_never_observed():
+    """Outside the measured extent there is no evidence, so nothing is deleted."""
+    fits = {"shelf_bottom": _bottom_fit()}
+    points = np.array(
+        [
+            [0.0, 0.7, -0.25],  # inside the fitted extent -> panel
+            [0.9, 0.7, -0.25],  # same height, x outside the fit
+            [0.0, 1.4, -0.25],  # same height, y outside the fit
+        ]
+    )
+    assert fitted_panel_mask(points, fits).tolist() == [True, False, False]
+
+
+def test_fitted_panel_mask_follows_the_free_space_sign():
+    """shelf_back's free space is on the -y side, so +y is the panel side."""
+    assert FACE_SPECS["shelf_back"].free_space_sign < 0
+    fits = {
+        "shelf_back": FaceFit(
+            face="shelf_back",
+            plane_m=0.88,
+            in_plane_ranges={0: (-0.3, 0.3), 2: (-0.3, 0.2)},
+            inliers=1500,
+        )
+    }
+    points = np.array(
+        [
+            [0.0, 0.90, 0.0],  # behind the fitted bound -> panel
+            [0.0, 0.70, 0.0],  # out in the bin -> a real obstacle
+        ]
+    )
+    assert fitted_panel_mask(points, fits).tolist() == [True, False]
+
+
+def test_fitted_panel_mask_without_fits_deletes_nothing():
+    points = np.array([[0.0, 0.7, -0.25], [0.0, 0.7, 0.1]])
+    assert not fitted_panel_mask(points, {}).any()
+    assert not fitted_panel_mask(points, {"shelf_bottom": None}).any()

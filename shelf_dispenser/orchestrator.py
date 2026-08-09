@@ -72,7 +72,6 @@ from .safe_planner import PlanTarget, SafeMotionPlanner, VerifiedPlan
 from .safety import FenceBox, SafetyProfile, load_safety_profile
 from .scene import (
     build_non_target_scene_voxels,
-    build_scene_voxels,
     build_target_occupancy_voxels,
     conservative_scene_union,
     head_scene_points,
@@ -1364,19 +1363,16 @@ class RunOrchestrator:
             if full_frame
             else min(image_height_px, self.params.scene_image_bottom_crop)
         )
-        per_frame_voxels = [
-            build_scene_voxels(
-                depth,
-                K,
-                self.T_base_head_camera,
-                localization,
-                self.params,
-                min_depth_m=self.params.head_min_depth_m,
-                max_depth_m=self.params.head_max_depth_m,
-                bottom_crop=observed_row_limit_px,
-            )
-            for depth in depth_frames
-        ]
+        # Fit the panels before voxelizing, not after: the non-target field
+        # subtracts what these fits already account for.  Both fits read the
+        # same depth_frames and nothing the voxel build produces, so moving
+        # them ahead changes the order and not the answer.
+        table_fit = self._adapt_fence_to_measured_table(
+            depth_frames, K, localization
+        )
+        shelf_fits = self._adapt_fence_to_measured_shelf(
+            depth_frames, K, localization
+        )
         per_frame_target_voxels = [
             build_target_occupancy_voxels(
                 depth,
@@ -1387,9 +1383,11 @@ class RunOrchestrator:
                 min_depth_m=self.params.head_min_depth_m,
                 max_depth_m=self.params.head_max_depth_m,
                 bottom_crop=observed_row_limit_px,
+                shelf_faces=shelf_fits,
             )
             for depth in depth_frames
         ]
+        panel_stats = [{} for _ in depth_frames]
         per_frame_non_target_voxels = [
             build_non_target_scene_voxels(
                 depth,
@@ -1400,12 +1398,11 @@ class RunOrchestrator:
                 min_depth_m=self.params.head_min_depth_m,
                 max_depth_m=self.params.head_max_depth_m,
                 bottom_crop=observed_row_limit_px,
+                shelf_faces=shelf_fits,
+                stats=stat,
             )
-            for depth in depth_frames
+            for depth, stat in zip(depth_frames, panel_stats)
         ]
-        self.head_scene_voxels = union_scene_voxels(
-            per_frame_voxels, self.params
-        )
         self.non_target_scene_voxels = union_scene_voxels(
             per_frame_non_target_voxels, self.params
         )
@@ -1414,13 +1411,19 @@ class RunOrchestrator:
             self.params,
             max_voxels=self.params.scene_max_voxels,
         )
+        self.head_scene_voxels = union_scene_voxels(
+            [self.target_occupancy_voxels, self.non_target_scene_voxels],
+            self.params,
+        )
         self.scene_voxels = list(self.head_scene_voxels)
-        table_fit = self._adapt_fence_to_measured_table(
-            depth_frames, K, localization
-        )
-        shelf_fits = self._adapt_fence_to_measured_shelf(
-            depth_frames, K, localization
-        )
+        if shelf_fits:
+            self.stage(
+                "货架平面扣除",
+                f"{len(shelf_fits)} 个已拟合货架面已由电子围栏解析表达，"
+                f"从障碍点云中扣除 {[s.get('panel_points_removed', 0) for s in panel_stats]} 个点"
+                f"；悬空碎块删 {[s.get('floating_fragments_removed', 0) for s in panel_stats]} 个体素"
+                f"（各帧保留 {[s.get('points_kept', 0) for s in panel_stats]} 个）",
+            )
         self.head_scene_captured_monotonic = captured_monotonic
         self._head_scene_reference_frame = self.safety.frame
         self._head_scene_base_pose = np.asarray(
@@ -1460,7 +1463,12 @@ class RunOrchestrator:
             ),
             encoding="utf-8",
         )
-        per_frame_counts = [len(item) for item in per_frame_voxels]
+        per_frame_counts = [
+            len({tuple(point) for point in target + non_target})
+            for target, non_target in zip(
+                per_frame_target_voxels, per_frame_non_target_voxels
+            )
+        ]
         self.stage(
             "构建障碍场景",
             (
@@ -1584,7 +1592,10 @@ class RunOrchestrator:
         present_faces = [
             box.id
             for box in self.safety.keepout_boxes
-            if box.id in SHELF_FACE_SPECS
+            if (
+                box.id in SHELF_FACE_SPECS
+                and SHELF_FACE_SPECS[box.id].live_fit
+            )
         ]
         if not present_faces:
             return {}
@@ -1613,10 +1624,13 @@ class RunOrchestrator:
         if adapted is not self.safety:
             self.safety = adapted
             self.scene_boxes = self.safety.moveit_collision_boxes()
+            measured = ", ".join(
+                f"{face}={fit.plane_m:.4f}m"
+                for face, fit in sorted(fits_by_face.items())
+            )
             self.stage(
                 "货架围栏自适应",
-                f"已按本轮实测更新 {len(fits_by_face)} 个货架面: "
-                f"{', '.join(sorted(fits_by_face))}",
+                f"已按本轮实测更新 {len(fits_by_face)} 个货架面: {measured}",
             )
         return fits_by_face
 
@@ -3299,11 +3313,11 @@ class RunOrchestrator:
             states.append(self.robot.gripper_state())
             time.sleep(0.05)
         positions = []
-        baseline = getattr(
-            self.robot,
-            "empty_close_pos",
-            self.params.gripper_empty_closed_position,
-        )
+        baseline = self.robot.empty_close_pos
+        if baseline is None:
+            raise SafetyAbort(
+                "本轮没有空夹基线，拒绝用夹爪位置确认 held——先跑空夹标定"
+            )
         threshold = baseline + self.params.gripper_object_margin
         for index, state in enumerate(states, 1):
             try:
@@ -3741,8 +3755,6 @@ class RunOrchestrator:
             self.stage("完成并保持", "不搬运、不放置；STOP/Ctrl+C 只保持")
         while not self.stop_event.wait(0.5):
             pass
-        if getattr(self.args, "restore_teleop", False):
-            self._restore_teleop()
 
     def _finish_from_current(self):
         """从当前姿态直接收尾：假设夹爪已抓着水瓶（上一轮运行遗留、保持在原地），
@@ -3759,8 +3771,6 @@ class RunOrchestrator:
         self.stage("完成", "STOP/Ctrl+C 结束")
         while not self.stop_event.wait(0.5):
             pass
-        if getattr(self.args, "restore_teleop", False):
-            self._restore_teleop()
 
     def _grasp_and_lift(
         self,
@@ -4887,24 +4897,6 @@ class RunOrchestrator:
             f"运动前检测到夹爪未闭合 (pos={pos})，先收拢到空载基线再继续",
         )
         self.robot.close_empty_gripper(self.params)
-
-    def _restore_teleop(self):
-        """best-effort 恢复官方遥操（--restore-teleop）。找不到脚本就只打印提示。"""
-        import subprocess
-
-        script = os.environ.get(
-            "UPSTART_ALL", "/home/rm/rmc_aida_l_atom/scripts/upstart_all.sh"
-        )
-        if not os.path.exists(script):
-            LOG.warning(
-                "未找到 %s，无法自动恢复遥操；请手动运行官方 upstart_all.sh", script
-            )
-            return
-        self.stage("恢复遥操", f"运行 {script}")
-        subprocess.Popen(
-            f"bash '{script}' > /home/rm/upstart_all_from_demo.log 2>&1 &",
-            shell=True,
-        )
 
     def close(self):
         self.stop_event.set()

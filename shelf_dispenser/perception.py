@@ -153,7 +153,19 @@ class BottleDetector:
         self.model = YOLO(model_path)
         self.confidence = confidence
         self.lock = threading.Lock()
-        self.aliases = {"bottle", "water", "mineral_water", "矿泉水", "水瓶"}
+        self.aliases = {
+            "bottle",
+            "water",
+            "mineral_water",
+            "矿泉水",
+            "水瓶",
+            "p01",
+            "p02",
+            "p03",
+            "p04",
+            "p05",
+            "p06",
+        }
         self.fallback_model = None
         self.fallback_confidence = fallback_confidence
         if fallback_model_path is not None:
@@ -170,13 +182,18 @@ class BottleDetector:
     ) -> Optional[Detection]:
         with self.lock:
             result = model.predict(bgr, conf=confidence, verbose=False)[0]
-        allowed = target_classes if target_classes is not None else self.aliases
+        allowed = {
+            str(item).lower().replace(" ", "_")
+            for item in (
+                target_classes if target_classes is not None else self.aliases
+            )
+        }
         choices = []
         for box in result.boxes:
             cls = int(box.cls[0])
             name = str(model.names[cls])
             normalized = name.lower().replace(" ", "_")
-            if normalized not in allowed and name not in allowed:
+            if normalized not in allowed:
                 continue
             detection = Detection(
                 tuple(map(int, box.xyxy[0].tolist())),

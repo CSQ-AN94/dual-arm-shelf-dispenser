@@ -1,0 +1,104 @@
+[
+  {
+    "fold": 0,
+    "best_epoch": 66,
+    "precision": 0.73034,
+    "recall": 0.78124,
+    "map50": 0.76893,
+    "map50_95": 0.71463,
+    "gt": 28,
+    "correct": 21,
+    "wrong_class": 4,
+    "missed": 3,
+    "false_positive": 6,
+    "errors": [
+      "3a965f7bfc93779eafdd4d07dd3b85e4_27.jpg: P03 -> P06 (0.275)",
+      "3a965f7bfc93779eafdd4d07dd3b85e4_27.jpg: P04 -> P01 (0.541)",
+      "3a965f7bfc93779eafdd4d07dd3b85e4_27.jpg: missed P03",
+      "3a965f7bfc93779eafdd4d07dd3b85e4_27.jpg: false P06 (0.530)",
+      "3a965f7bfc93779eafdd4d07dd3b85e4_27.jpg: false P04 (0.424)",
+      "4e6e85483b0acd36dc2f423c2eb716c1_34.jpg: false P06 (0.646)",
+      "5ef5c52cc675810932404c02df11e213_1.jpg: P02 -> P06 (0.660)",
+      "7a034e8c4c416771372722830ba324ab_25.jpg: P03 -> P02 (0.827)",
+      "7a034e8c4c416771372722830ba324ab_25.jpg: false P06 (0.634)",
+      "8624924ddcd3b6868d77c1d6258836b5_15.jpg: false P06 (0.354)",
+      "daf4233188c94eb8c63965a28129f418_41.jpg: missed P04",
+      "f2afd12fe19097ef0aff922f60cfcc08_20.jpg: missed P04",
+      "f2afd12fe19097ef0aff922f60cfcc08_20.jpg: false P06 (0.504)"
+    ],
+    "confidence_min": 0.2701497972011566,
+    "confidence_median": 0.5221875905990601,
+    "per_class": {
+      "P01": {
+        "correct": 5,
+        "gt": 5
+      },
+      "P02": {
+        "correct": 4,
+        "gt": 5,
+        "wrong": 1
+      },
+      "P03": {
+        "correct": 4,
+        "gt": 7,
+        "wrong": 2,
+        "missed": 1
+      },
+      "P04": {
+        "correct": 3,
+        "wrong": 1,
+        "gt": 6,
+        "missed": 2
+      },
+      "P06": {
+        "correct": 5,
+        "gt": 5
+      }
+    }
+  },
+  {
+    "fold": 1,
+    "best_epoch": 93,
+    "precision": 0.92696,
+    "recall": 0.9225,
+    "map50": 0.9765,
+    "map50_95": 0.95925,
+    "gt": 26,
+    "correct": 24,
+    "wrong_class": 0,
+    "missed": 2,
+    "false_positive": 2,
+    "errors": [
+      "2910b0c1bb94d7e3916fe3bcd7f5d01c_23.jpg: missed P03",
+      "787a7795a5dcda070b93663402b8b4ee_37.jpg: missed P06",
+      "c8ad745a177fd7fda840c43ec17e85ef_8.jpg: false P03 (0.369)",
+      "e305f08cb575cb6c605be139421752ef_32.jpg: false P04 (0.356)"
+    ],
+    "confidence_min": 0.3081830143928528,
+    "confidence_median": 0.9001365303993225,
+    "per_class": {
+      "P01": {
+        "correct": 5,
+        "gt": 5
+      },
+      "P02": {
+        "correct": 5,
+        "gt": 5
+      },
+      "P03": {
+        "correct": 4,
+        "gt": 5,
+        "missed": 1
+      },
+      "P04": {
+        "correct": 4,
+        "gt": 4
+      },
+      "P06": {
+        "correct": 6,
+        "gt": 7,
+        "missed": 1
+      }
+    }
+  }
+]

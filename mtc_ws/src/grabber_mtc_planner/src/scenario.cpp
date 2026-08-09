@@ -208,6 +208,11 @@ Scenario loadScenario(const std::string& path)
 	if (s.source_grasp_candidates.empty())
 		s.source_grasp_candidates.push_back({ "primary", s.source_grasp_pose });
 	s.target_place_pose = readPose(require(root, "target_place_pose", "scenario"), "target_place_pose");
+	if (const auto& preplace = root["target_preplace_pose"])
+	{
+		s.target_preplace_pose = readPose(preplace, "target_preplace_pose");
+		s.has_target_preplace_pose = true;
+	}
 
 	s.source_approach_direction =
 	    readVector3(require(root, "source_approach_direction", "scenario"), "source_approach_direction");
@@ -219,6 +224,9 @@ Scenario loadScenario(const std::string& path)
 	    readVector3(require(root, "source_retreat_direction", "scenario"), "source_retreat_direction");
 	s.target_insert_direction =
 	    readVector3(require(root, "target_insert_direction", "scenario"), "target_insert_direction");
+	s.target_contact_direction = root["target_contact_direction"] ?
+	                                 readVector3(root["target_contact_direction"], "target_contact_direction") :
+	                                 s.target_insert_direction;
 	s.target_retreat_direction =
 	    readVector3(require(root, "target_retreat_direction", "scenario"), "target_retreat_direction");
 
@@ -257,6 +265,24 @@ Scenario loadScenario(const std::string& path)
 		                 s.source_grasp_reference_joints_deg.end(),
 		                 [](double value) { return std::isfinite(value); }))
 			fail("source_grasp_reference_joints_deg must contain seven finite degrees");
+	}
+	if (const auto& reference = root["target_place_reference_joints_deg"])
+	{
+		s.target_place_reference_joints_deg = reference.as<std::vector<double>>();
+		if (s.target_place_reference_joints_deg.size() != 7 ||
+		    !std::all_of(s.target_place_reference_joints_deg.begin(),
+		                 s.target_place_reference_joints_deg.end(),
+		                 [](double value) { return std::isfinite(value); }))
+			fail("target_place_reference_joints_deg must contain seven finite degrees");
+	}
+	if (const auto& reference = root["target_preplace_reference_joints_deg"])
+	{
+		s.target_preplace_reference_joints_deg = reference.as<std::vector<double>>();
+		if (s.target_preplace_reference_joints_deg.size() != 7 ||
+		    !std::all_of(s.target_preplace_reference_joints_deg.begin(),
+		                 s.target_preplace_reference_joints_deg.end(),
+		                 [](double value) { return std::isfinite(value); }))
+			fail("target_preplace_reference_joints_deg must contain seven finite degrees");
 	}
 	if (const auto& home = root["post_place_home_joints_deg"])
 	{
@@ -391,10 +417,82 @@ Scenario loadScenario(const std::string& path)
 			fail("place_only scenario requires explicit scene freshness");
 		if (!std::isfinite(s.target_contact_distance_m) ||
 		    s.target_contact_distance_m <= 0.0 ||
-		    s.target_contact_distance_m >= s.target_preplace_offset_m)
-			fail("target_contact_distance_m must be positive and shorter than target_preplace_offset_m");
+		    !std::isfinite(s.target_preplace_offset_m) ||
+		    s.target_preplace_offset_m <= 0.0 ||
+		    !std::isfinite(s.target_retreat_distance_m) ||
+		    std::abs(s.target_retreat_distance_m - s.target_preplace_offset_m) > 1e-6)
+			fail("place_only entry and exit distances must be equal positive values");
+		if (const auto& raise = root["target_transit_raise_m"])
+	{
+		s.target_transit_raise_m = raise.as<double>();
+		if (!std::isfinite(s.target_transit_raise_m) || s.target_transit_raise_m < 0.0 ||
+		    s.target_transit_raise_m > 0.5)
+			fail("target_transit_raise_m must be a finite 0..0.5 m lift");
+	}
+	if (!root["target_contact_direction"])
+			fail("place_only requires target_contact_direction");
+		const double reverse_dot =
+		    s.target_insert_direction.x * s.target_retreat_direction.x +
+		    s.target_insert_direction.y * s.target_retreat_direction.y +
+		    s.target_insert_direction.z * s.target_retreat_direction.z;
+		const double axes_dot =
+		    s.target_insert_direction.x * s.target_contact_direction.x +
+		    s.target_insert_direction.y * s.target_contact_direction.y +
+		    s.target_insert_direction.z * s.target_contact_direction.z;
+		// The contact move must press the bottle onto its support.  That used
+		// to be written as "orthogonal to the insert", which is the same thing
+		// ONLY while the insert is horizontal -- tilt the insert and the
+		// orthogonal direction rotates towards horizontal, so the rule ends up
+		// demanding a sideways shove against a bottle already standing on the
+		// panel.
+		//
+		// Measured against the three placements the operator performed by hand
+		// on 2026-08-07, taking the last 10 mm against the 75 mm before it:
+		//
+		//     C  88 deg      E  65 deg      D  70 deg
+		//
+		// Two of the three fail the orthogonality test outright and the third
+		// misses the 89.4-90.6 deg band.  None of them was a bad placement; the
+		// rule simply describes a choreography nobody performs.  What all three
+		// DO share is where that last move points: z of -0.74, -0.78 and -0.64,
+		// every one of them firmly downwards.
+		//
+		// So require what was actually meant.  -0.5 admits all three with room
+		// and still refuses a horizontal shove.  What is given up is the old
+		// rule's side effect of forbidding any further insertion during the
+		// settle; target_contact_distance_m bounds that at 10 mm.
+		if (reverse_dot > -0.99)
+			fail("place_only must exit opposite the way it entered");
+		if (!(s.target_contact_direction.z <= -0.5))
+			fail("place_only contact move must press onto the support (z <= -0.5)");
+		(void)axes_dot;
 		if (s.post_place_home_joints_deg.empty())
 			fail("place_only scenario requires post_place_home_joints_deg");
+		if (s.target_place_reference_joints_deg.empty() && !s.fixture_source)
+			fail("place_only scenario requires target_place_reference_joints_deg");
+		if (s.has_target_preplace_pose)
+		{
+			if (s.target_preplace_reference_joints_deg.empty())
+				fail("demonstrated place route requires target_preplace_reference_joints_deg");
+			const double expected_x =
+			    s.target_preplace_pose.position.x +
+			    s.target_insert_direction.x * s.target_preplace_offset_m +
+			    s.target_contact_direction.x * s.target_contact_distance_m;
+			const double expected_y =
+			    s.target_preplace_pose.position.y +
+			    s.target_insert_direction.y * s.target_preplace_offset_m +
+			    s.target_contact_direction.y * s.target_contact_distance_m;
+			const double expected_z =
+			    s.target_preplace_pose.position.z +
+			    s.target_insert_direction.z * s.target_preplace_offset_m +
+			    s.target_contact_direction.z * s.target_contact_distance_m;
+			const double error = std::sqrt(
+			    std::pow(expected_x - s.target_place_pose.position.x, 2) +
+			    std::pow(expected_y - s.target_place_pose.position.y, 2) +
+			    std::pow(expected_z - s.target_place_pose.position.z, 2));
+			if (!std::isfinite(error) || error > 1e-5)
+				fail("target_preplace_pose does not reach target_place_pose");
+		}
 	}
 
 	s.planner_id = root["planner_id"].as<std::string>(s.planner_id);

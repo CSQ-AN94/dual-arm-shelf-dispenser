@@ -31,11 +31,22 @@ DEFAULT_REMOTE = "/home/rm/dual-arm-shelf-dispenser"
 # Deliberately not the whole tree: a drifting README is not worth an alarm that
 # people learn to ignore.
 TRACKED = [
+    "config.yaml",
+    "shelf_dispenser/model_assets.lock.json",
+    "intelligence/yolo_models/mixed_shelf_yolo26s_all51.pt",
     "shelf_dispenser/core.py",
     "shelf_dispenser/orchestrator.py",
     "shelf_dispenser/grasp_orientation.py",
     "shelf_dispenser/mtc_execution.py",
     "shelf_dispenser/mtc_pick_contract.py",
+    "mtc_ws/src/grabber_mtc_planner/src/plan_shelf_transfer.cpp",
+    "mtc_ws/src/grabber_mtc_planner/src/scenario.cpp",
+    "mtc_ws/src/grabber_mtc_planner/src/scenario.hpp",
+    "mtc_ws/src/grabber_mtc_planner/scenarios/shelf_transfer_fixture.yaml",
+    "mtc_ws/src/grabber_mtc_planner/launch/plan_shelf_transfer_experimental.launch.py",
+    "mtc_ws/src/grabber_mtc_planner/package.xml",
+    "mtc_ws/src/grabber_robot_state_bridge/grabber_robot_state_bridge/robot_description.py",
+    "mtc_ws/src/grabber_robot_state_bridge/launch/live_state_plan_only.launch.py",
     "shelf_dispenser/planner.py",
     "shelf_dispenser/ros/plan_once.py",
     "shelf_dispenser/ros/scene_helpers.py",
@@ -45,20 +56,42 @@ TRACKED = [
     "shelf_dispenser/safety.py",
     "shelf_dispenser/safety_profiles.json",
     "shelf_dispenser/scene.py",
+    "shelf_dispenser/shelf_model.py",
+    "shelf_dispenser/grasp_ledger.py",
+    "shelf_dispenser/inventory.py",
+    "shelf_dispenser/relative_place.py",
+    "utils/items_info.py",
     "scripts/calibrate_mtc_gripper.py",
     "scripts/capture_empty_shelf_places.py",
     "scripts/capture_mtc_direct_pick_scene.py",
+    "scripts/_patch_after_raise.py",
     "scripts/empty_shelf_places_to_mtc_scenario.py",
     "scripts/execute_mtc_lift_transfer.py",
     "scripts/execute_mtc_trajectory.py",
     "scripts/localization_to_mtc_scenario.py",
+    "scripts/diagnose_gripper_voxel_contact.py",
     "shelf_dispenser/arm_worker.py",
     "shelf_dispenser/left_arm.py",
     "scripts/normalize_left_arm.py",
+    "scripts/normalize_right_arm.py",
+    "scripts/shelf_row_template_tool.py",
+    "scripts/apply_demonstrated_grasp_to_scenario.py",
+    "scripts/gripper_grasp_test.py",
+    "scripts/replay_demonstrated_trajectory.py",
+    "shelf_dispenser/live_arm.py",
     "scripts/normalize_to_grasp_start.py",
     "scripts/measure_left_arm_bridge.py",
     "scripts/solve_left_arm_model.py",
     "scripts/run_cross_layer_cycle.sh",
+    "outputs/row_templates.json",
+    "outputs/demonstrated_trajectories/place_A1_left_20260808.json",
+    "outputs/demonstrated_trajectories/place_A2_left_20260808.json",
+    "outputs/demonstrated_trajectories/place_A3_right_20260808.json",
+    "outputs/demonstrated_trajectories/place_A4_right_20260808.json",
+    "outputs/demonstrated_trajectories/place_B1_left_20260808.json",
+    "outputs/demonstrated_trajectories/place_B2_left_20260808.json",
+    "outputs/demonstrated_trajectories/place_B3_right_20260808.json",
+    "outputs/demonstrated_trajectories/place_B4_right_20260808.json",
 ]
 
 
@@ -106,11 +139,11 @@ def main() -> int:
     cli = parser.parse_args()
 
     local = local_digests()
-    remote = remote_digests(cli.host, cli.remote)
+    remote_hashes = remote_digests(cli.host, cli.remote)
     drift = [
         rel
         for rel in TRACKED
-        if remote.get(rel, "缺失") != local[rel]
+        if remote_hashes.get(rel, "缺失") != local[rel]
     ]
 
     print(f"本地 {ROOT}")
@@ -120,7 +153,11 @@ def main() -> int:
         return 0
     print(f"✗ {len(drift)}/{len(TRACKED)} 个文件不一致：")
     for rel in drift:
-        state = "机器人上没有" if remote.get(rel) == "缺失" else "内容不同"
+        state = (
+            "机器人上没有"
+            if remote_hashes.get(rel) == "缺失"
+            else "内容不同"
+        )
         print(f"    {rel:52s} {state}")
     if not cli.push:
         print("\n加 --push 同步这些文件。未同步前跑真机 = 跑的不是你看的代码。")
@@ -128,6 +165,14 @@ def main() -> int:
 
     print("\n同步中……")
     for rel in drift:
+        parent = str(Path(cli.remote, rel).parent)
+        mkdir = subprocess.run(
+            ["ssh", "-o", "ConnectTimeout=8", cli.host, "mkdir", "-p", parent],
+            capture_output=True,
+            text=True,
+        )
+        if mkdir.returncode != 0:
+            raise SystemExit(f"{rel} 远端目录创建失败: {mkdir.stderr.strip()}")
         target = f"{cli.host}:{cli.remote}/{rel}"
         result = subprocess.run(
             ["scp", "-q", str(ROOT / rel), target], capture_output=True, text=True

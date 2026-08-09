@@ -70,7 +70,9 @@ cartesian_min_fraction: 0.6
 bottle:
   id: bottle
   radius_m: 0.033
-  height_m: 0.21
+  height_m: 0.217
+  # Measured straight-sided body. The upper 42 mm neck/cap is not graspable.
+  graspable_cylinder_height_m: 0.175
   # Cylinder centre; the measured point is the grasp point, so the cylinder is
   # centred on it rather than on the true bottle centroid.
   pose:

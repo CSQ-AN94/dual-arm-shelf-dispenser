@@ -1,0 +1,287 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1280" viewBox="0 0 1680 1280" role="img" aria-labelledby="title desc">
+  <title id="title">dual-arm-shelf-dispenser 项目整体结构图</title>
+  <desc id="desc">展示跨层抓放主事务、Python shelf_dispenser 模块分层、ROS 2 与 MoveIt Task Constructor 只规划边界、真实双臂与升降硬件，以及贯穿规划和执行的安全门禁与运行证据。</desc>
+
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#DCE3E8" stroke-width="0.7" opacity="0.48"/>
+    </pattern>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#1F6F8B"/>
+    </marker>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#657887"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#C9791B"/>
+    </marker>
+    <style>
+      .font { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; }
+      .title { font-size: 34px; font-weight: 650; fill: #102A3A; }
+      .subtitle { font-size: 16px; font-weight: 400; fill: #526776; }
+      .meta { font-size: 12px; font-weight: 650; letter-spacing: 0.9px; fill: #526776; }
+      .lane-id { font-size: 13px; font-weight: 750; fill: #FFFFFF; }
+      .lane-name { font-size: 14px; font-weight: 750; letter-spacing: 1.1px; fill: #294454; }
+      .module-title { font-size: 17px; font-weight: 650; fill: #173544; }
+      .module-note { font-size: 13px; font-weight: 400; fill: #596E7C; }
+      .small { font-size: 11.5px; font-weight: 400; fill: #657887; }
+      .port { font-size: 11.5px; font-weight: 650; fill: #1F6F8B; }
+      .code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 11px; fill: #405968; }
+      .code-strong { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 12px; font-weight: 650; fill: #264B5C; }
+      .safety-title { font-size: 15px; font-weight: 650; fill: #75470F; }
+      .safety-note { font-size: 11.5px; font-weight: 400; fill: #7B654A; }
+      .line-blue { fill: none; stroke: #1F6F8B; stroke-width: 2; marker-end: url(#arrow-blue); }
+      .line-gray { fill: none; stroke: #657887; stroke-width: 1.5; marker-end: url(#arrow-gray); }
+      .line-feedback { fill: none; stroke: #657887; stroke-width: 1.45; stroke-dasharray: 6 5; marker-end: url(#arrow-gray); }
+      .line-safety { fill: none; stroke: #C9791B; stroke-width: 1.7; stroke-dasharray: 6 5; marker-end: url(#arrow-orange); }
+      .lane { fill: #FFFFFF; stroke: #C6D0D8; stroke-width: 1.2; }
+      .module { fill: #FAFBFC; stroke: #95A6B3; stroke-width: 1.2; }
+      .module-blue { fill: #F2F8FA; stroke: #1F6F8B; stroke-width: 1.35; }
+      .module-safety { fill: #FFF9F0; stroke: #C9791B; stroke-width: 1.25; }
+      .group { fill: #F8FAFB; stroke: #AEBEC9; stroke-width: 1.2; }
+    </style>
+  </defs>
+
+  <rect width="1680" height="1280" fill="#F6F8FA"/>
+  <rect width="1680" height="1280" fill="url(#grid)"/>
+  <rect x="30" y="28" width="1620" height="1224" rx="8" fill="none" stroke="#AEBBC5" stroke-width="1.2"/>
+
+  <g class="font">
+    <text x="60" y="70" class="meta">PROJECT ARCHITECTURE · VERIFIED FROM CODE · 2026-08-05</text>
+    <text x="60" y="111" class="title">dual-arm-shelf-dispenser 项目整体结构</text>
+    <text x="60" y="139" class="subtitle">新鲜感知 → MTC 只规划 → 独立门禁执行 → 跨层升降 → 重新感知与放置</text>
+    <g transform="translate(1160 48)">
+      <text x="0" y="0" class="meta">PLATFORM</text>
+      <text x="0" y="20" class="module-note">2 × RealMan RM75 · RMG24 · serial lift</text>
+      <text x="0" y="39" class="meta">COMPUTE</text>
+      <text x="0" y="59" class="module-note">Jetson AGX Orin · ROS 2 Humble</text>
+      <text x="0" y="78" class="meta">STATUS</text>
+      <text x="0" y="98" class="module-note">真实抓取已成功；完整跨层循环尚未完成</text>
+    </g>
+    <line x1="60" y1="160" x2="1620" y2="160" stroke="#9EADB8"/>
+  </g>
+
+  <!-- Lane A: transaction -->
+  <g class="font">
+    <rect x="60" y="184" width="1560" height="190" rx="5" class="lane"/>
+    <rect x="60" y="184" width="1560" height="38" fill="#E9EEF2"/>
+    <rect x="74" y="192" width="24" height="22" rx="3" fill="#294454"/>
+    <text x="86" y="208" text-anchor="middle" class="lane-id">A</text>
+    <text x="110" y="209" class="lane-name">真实跨层事务 / LIVE CROSS-LAYER TRANSACTION</text>
+
+    <rect x="84" y="248" width="236" height="96" rx="4" class="module"/>
+    <text x="100" y="276" class="module-title">工作流入口</text>
+    <text x="100" y="299" class="code">run_cross_layer_cycle.sh</text>
+    <text x="100" y="319" class="code">run_mtc_cross_layer_workflow.py</text>
+    <text x="100" y="337" class="small">阶段编排 · 超时 · 失败即停</text>
+
+    <rect x="360" y="248" width="220" height="96" rx="4" class="module-blue"/>
+    <text x="376" y="276" class="module-title">新鲜场景采集</text>
+    <text x="376" y="299" class="module-note">头部 RGB-D · YOLO 目标</text>
+    <text x="376" y="319" class="module-note">货架几何 · 非目标体素</text>
+    <text x="376" y="337" class="code">scenario.yaml</text>
+
+    <rect x="620" y="248" width="206" height="96" rx="4" class="module-blue"/>
+    <text x="636" y="276" class="module-title">MTC 只规划</text>
+    <text x="636" y="299" class="module-note">pick / place 分段轨迹</text>
+    <text x="636" y="319" class="module-note">不启动控制器、不执行</text>
+    <text x="636" y="337" class="code">result + trajectory</text>
+
+    <rect x="866" y="238" width="240" height="116" rx="4" class="module-safety"/>
+    <text x="882" y="268" class="safety-title">显式门禁执行</text>
+    <text x="882" y="291" class="safety-note">绑定场景 / 结果 / 轨迹 / 实时起点</text>
+    <text x="882" y="311" class="safety-note">密集 TCP 围栏 · 夹爪反馈 · 左臂漂移</text>
+    <line x1="882" y1="323" x2="1090" y2="323" stroke="#D9C3A4"/>
+    <text x="882" y="343" class="code">execute_mtc_trajectory.py</text>
+
+    <rect x="1146" y="248" width="176" height="96" rx="4" class="module"/>
+    <text x="1162" y="276" class="module-title">持瓶升降</text>
+    <text x="1162" y="299" class="module-note">647 → 250 mm</text>
+    <text x="1162" y="319" class="module-note">姿态与夹持证据门禁</text>
+    <text x="1162" y="337" class="code">lift_execution.json</text>
+
+    <rect x="1362" y="248" width="230" height="96" rx="4" class="module-blue"/>
+    <text x="1378" y="276" class="module-title">下层重采样并放置</text>
+    <text x="1378" y="299" class="module-note">空位 → place 场景</text>
+    <text x="1378" y="319" class="module-note">再次 MTC 规划 + 门禁执行</text>
+    <text x="1378" y="337" class="small">不复用抓取前的旧场景</text>
+
+    <path d="M320 296H360" class="line-blue"/>
+    <path d="M580 296H620" class="line-blue"/>
+    <path d="M826 296H866" class="line-blue"/>
+    <path d="M1106 296H1146" class="line-blue"/>
+    <path d="M1322 296H1362" class="line-blue"/>
+  </g>
+
+  <!-- Lane B: Python package -->
+  <g class="font">
+    <rect x="60" y="398" width="1560" height="344" rx="5" class="lane"/>
+    <rect x="60" y="398" width="1560" height="38" fill="#E9EEF2"/>
+    <rect x="74" y="406" width="24" height="22" rx="3" fill="#294454"/>
+    <text x="86" y="422" text-anchor="middle" class="lane-id">B</text>
+    <text x="110" y="423" class="lane-name">PYTHON LIBRARY / shelf_dispenser</text>
+
+    <rect x="84" y="460" width="330" height="194" rx="4" class="group"/>
+    <rect x="84" y="460" width="330" height="31" fill="#E6EDF1"/>
+    <text x="98" y="481" class="meta">ORCHESTRATION</text>
+    <text x="102" y="522" class="code-strong">orchestrator.py</text>
+    <text x="102" y="544" class="module-note">RunOrchestrator：一轮硬件、场景与规划状态</text>
+    <text x="102" y="570" class="code">workflows.py</text>
+    <text x="102" y="590" class="module-note">有界任务状态机与恢复语义</text>
+    <text x="102" y="616" class="code">run_manifest.py · console.py</text>
+    <text x="102" y="638" class="small">结构债务：orchestrator 占包内代码约 28%</text>
+
+    <rect x="442" y="460" width="330" height="194" rx="4" class="group"/>
+    <rect x="442" y="460" width="330" height="31" fill="#DDEBF0"/>
+    <text x="456" y="481" class="meta">PERCEPTION &amp; WORLD MODEL</text>
+    <text x="460" y="522" class="code-strong">camera_access.py · perception.py</text>
+    <text x="460" y="544" class="module-note">D435 访问、检测与稳健深度</text>
+    <text x="460" y="570" class="code">scene.py · shelf_model.py</text>
+    <text x="460" y="590" class="module-note">体素、货架面、目标占据</text>
+    <text x="460" y="616" class="code">target_guard.py · shelf_survey.py</text>
+    <text x="460" y="638" class="small">每个消费者在使用前重采样</text>
+
+    <rect x="800" y="460" width="330" height="194" rx="4" class="group"/>
+    <rect x="800" y="460" width="330" height="31" fill="#DDEBF0"/>
+    <text x="814" y="481" class="meta">PLANNING &amp; CONTRACTS</text>
+    <text x="818" y="522" class="code-strong">planner.py · safe_planner.py</text>
+    <text x="818" y="544" class="module-note">MoveIt 子进程边界、候选与独立复核</text>
+    <text x="818" y="570" class="code">mtc_pick_contract.py</text>
+    <text x="818" y="590" class="module-note">MTC pick / place 导出 fail-closed 契约</text>
+    <text x="818" y="616" class="code">ros/plan_once.py · state_validity.py</text>
+    <text x="818" y="638" class="small">ROS 系统 Python 通过路径独立运行</text>
+
+    <rect x="1158" y="460" width="434" height="194" rx="4" class="group"/>
+    <rect x="1158" y="460" width="434" height="31" fill="#E6EDF1"/>
+    <text x="1172" y="481" class="meta">EXECUTION &amp; DEVICE ADAPTERS</text>
+    <text x="1176" y="522" class="code-strong">mtc_execution.py · arm.py</text>
+    <text x="1176" y="544" class="module-note">轨迹门禁、RealMan SDK 运动与夹爪反馈</text>
+    <text x="1176" y="570" class="code">arm_worker.py · left_arm.py · live_arm.py</text>
+    <text x="1176" y="590" class="module-note">每臂独立进程，隔离 SDK 全局运动学状态</text>
+    <text x="1176" y="616" class="code">mobile_body.py · head_lock.py</text>
+    <text x="1176" y="638" class="small">升降 / 底盘 / 头部姿态适配器</text>
+
+    <rect x="84" y="676" width="1508" height="44" rx="4" class="module-safety"/>
+    <text x="102" y="704" class="safety-title">共享底座与安全边界</text>
+    <text x="294" y="704" class="code">core.py</text>
+    <text x="366" y="704" class="safety-note">数据类型 / 插值 / SafetyAbort</text>
+    <text x="622" y="704" class="code">safety.py + safety_profiles.json</text>
+    <text x="888" y="704" class="safety-note">电子围栏 / 标定 / keepout</text>
+    <text x="1118" y="704" class="code">environment_guard.py</text>
+    <text x="1289" y="704" class="safety-note">被动左臂稳定性</text>
+
+    <path d="M414 522H426V448H1144" fill="none" stroke="#1F6F8B" stroke-width="2"/>
+    <path d="M607 448V460" class="line-blue"/>
+    <path d="M965 448V460" class="line-blue"/>
+    <path d="M1144 448V522H1158" class="line-blue"/>
+    <path d="M250 676V660H1375V654" class="line-safety"/>
+  </g>
+
+  <!-- Lane C: ROS boundary -->
+  <g class="font">
+    <rect x="60" y="766" width="1560" height="254" rx="5" class="lane"/>
+    <rect x="60" y="766" width="1560" height="38" fill="#E9EEF2"/>
+    <rect x="74" y="774" width="24" height="22" rx="3" fill="#294454"/>
+    <text x="86" y="790" text-anchor="middle" class="lane-id">C</text>
+    <text x="110" y="791" class="lane-name">ROS 2 / MOVEIT 进程边界 — PLAN ONLY</text>
+
+    <rect x="84" y="838" width="210" height="116" rx="4" class="module"/>
+    <text x="100" y="867" class="module-title">场景契约</text>
+    <text x="100" y="891" class="code">scenario.yaml</text>
+    <text x="100" y="914" class="module-note">目标、货架、体素、围栏</text>
+    <text x="100" y="935" class="small">带版本与新鲜度证据</text>
+
+    <rect x="334" y="826" width="270" height="140" rx="4" class="module-blue"/>
+    <text x="350" y="856" class="module-title">实时状态桥</text>
+    <text x="350" y="880" class="code">grabber_robot_state_bridge</text>
+    <text x="350" y="903" class="module-note">只读左右臂 + 升降控制器</text>
+    <text x="350" y="924" class="module-note">发布 27 关节 /joint_states</text>
+    <text x="350" y="947" class="small">失败或过期读数不继续发布</text>
+
+    <rect x="644" y="826" width="270" height="140" rx="4" class="module-blue"/>
+    <text x="660" y="856" class="module-title">MoveIt move_group</text>
+    <text x="660" y="880" class="module-note">实时 CurrentState + PlanningScene</text>
+    <text x="660" y="903" class="module-note">碰撞、IK、OMPL / Pilz</text>
+    <text x="660" y="926" class="safety-note">allow_trajectory_execution = false</text>
+    <text x="660" y="947" class="small">无 controller manager / action server</text>
+
+    <rect x="954" y="826" width="344" height="140" rx="4" class="module-blue"/>
+    <text x="970" y="856" class="module-title">MoveIt Task Constructor</text>
+    <text x="970" y="880" class="code">grabber_mtc_planner (C++)</text>
+    <text x="970" y="903" class="module-note">pregrasp → approach → attach → retreat</text>
+    <text x="970" y="924" class="module-note">transport → approach → release → retreat</text>
+    <text x="970" y="947" class="small">只导出，不调用 Task::execute()</text>
+
+    <rect x="1338" y="838" width="254" height="116" rx="4" class="module"/>
+    <text x="1354" y="867" class="module-title">执行凭证</text>
+    <text x="1354" y="891" class="code">result.json</text>
+    <text x="1354" y="912" class="code">trajectory.json</text>
+    <text x="1354" y="935" class="small">由 Python 门禁器再次验证</text>
+
+    <path d="M294 896H320V814H1126V826" class="line-blue"/>
+    <text x="660" y="812" text-anchor="middle" class="port">fresh scene</text>
+    <path d="M604 896H644" class="line-feedback"/>
+    <text x="624" y="885" text-anchor="middle" class="small">state</text>
+    <path d="M914 896H954" class="line-blue"/>
+    <text x="934" y="885" text-anchor="middle" class="port">scene</text>
+    <path d="M1298 896H1338" class="line-blue"/>
+  </g>
+
+  <!-- Lane D: hardware, evidence and safety -->
+  <g class="font">
+    <rect x="60" y="1044" width="1560" height="174" rx="5" class="lane"/>
+    <rect x="60" y="1044" width="1560" height="38" fill="#E9EEF2"/>
+    <rect x="74" y="1052" width="24" height="22" rx="3" fill="#294454"/>
+    <text x="86" y="1068" text-anchor="middle" class="lane-id">D</text>
+    <text x="110" y="1069" class="lane-name">真实硬件、反馈与证据 / HARDWARE, FEEDBACK &amp; AUDIT</text>
+
+    <rect x="84" y="1103" width="226" height="82" rx="4" class="module"/>
+    <text x="100" y="1131" class="module-title">RGB-D 传感器</text>
+    <text x="100" y="1154" class="module-note">头部 D435 + 腕部相机</text>
+    <text x="100" y="1175" class="small">图像 / 深度 / 时间戳</text>
+
+    <rect x="350" y="1093" width="306" height="102" rx="4" class="module-blue"/>
+    <text x="366" y="1121" class="module-title">双 RM75 + RMG24</text>
+    <text x="366" y="1144" class="module-note">右臂执行；左臂进入碰撞场并监控漂移</text>
+    <text x="366" y="1165" class="module-note">关节 / TCP / 健康 / 夹爪位置与电流反馈</text>
+    <text x="366" y="1186" class="small">RealMan SDK；两臂进程隔离</text>
+
+    <rect x="696" y="1103" width="216" height="82" rx="4" class="module-blue"/>
+    <text x="712" y="1131" class="module-title">串口升降柱</text>
+    <text x="712" y="1154" class="module-note">250–707 mm · 状态回读</text>
+    <text x="712" y="1175" class="small">持瓶转层时机械臂保持收拢</text>
+
+    <rect x="952" y="1093" width="284" height="102" rx="4" class="module"/>
+    <text x="968" y="1121" class="module-title">物理场景</text>
+    <text x="968" y="1144" class="module-note">货架层板 · 瓶子 · 非目标障碍 · 空位</text>
+    <text x="968" y="1165" class="module-note">所有场景声明由新鲜采集或实测配置产生</text>
+    <text x="968" y="1186" class="small">未知几何不推断为已验证净空</text>
+
+    <rect x="1276" y="1093" width="316" height="102" rx="4" class="module-safety"/>
+    <text x="1292" y="1121" class="safety-title">可审计运行证据</text>
+    <text x="1292" y="1144" class="code">scenario → plan → execution record</text>
+    <text x="1292" y="1165" class="safety-note">场景版本、新鲜度、实时起点、夹持与升降证据</text>
+    <text x="1292" y="1186" class="small">下一阶段验证上一阶段记录后才继续</text>
+
+    <path d="M197 1103H48V232H470V248" class="line-feedback"/>
+    <text x="298" y="245" class="small">fresh RGB-D</text>
+    <path d="M503 1093V1002H469V966" class="line-feedback"/>
+    <text x="510" y="1028" class="small">measured joints</text>
+    <path d="M804 1103V1002H550V966" class="line-feedback"/>
+    <text x="694" y="992" class="small">lift state</text>
+    <path d="M1434 1093V1028H1465V954" class="line-safety"/>
+    <text x="1450" y="1020" class="safety-note">credential</text>
+  </g>
+
+  <g class="font">
+    <line x1="60" y1="1234" x2="1620" y2="1234" stroke="#AEBBC5"/>
+    <path d="M82 1247H122" class="line-blue"/>
+    <text x="132" y="1252" class="small">主数据 / 控制流</text>
+    <path d="M286 1247H326" class="line-feedback"/>
+    <text x="336" y="1252" class="small">测量反馈 / 新鲜度</text>
+    <path d="M522 1247H562" class="line-safety"/>
+    <text x="572" y="1252" class="small">独立门禁 / 凭证</text>
+    <text x="800" y="1252" class="small">OFFLINE: test/ 无硬件测试 · scripts/mujoco_* 仅回放/仿真</text>
+    <text x="1598" y="1252" text-anchor="end" class="meta">CANONICAL: EDITABLE SVG</text>
+  </g>
+</svg>

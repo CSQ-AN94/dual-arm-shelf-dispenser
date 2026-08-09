@@ -20,6 +20,7 @@
 #include <moveit/task_constructor/container.h>
 #include <moveit/task_constructor/cost_terms.h>
 #include <moveit/task_constructor/solvers/cartesian_path.h>
+#include <moveit/task_constructor/solvers/joint_interpolation.h>
 #include <moveit/task_constructor/solvers/pipeline_planner.h>
 #include <moveit/task_constructor/stages/compute_ik.h>
 #include <moveit/task_constructor/stages/connect.h>
@@ -646,10 +647,55 @@ geometry_msgs::msg::PoseStamped stamped(const geometry_msgs::msg::Pose& p, const
 	return out;
 }
 
+/// Two ways across a free-space leg, both handed to the audit.
+///
+/// The three grasps demonstrated by hand on 2026-08-06 say this leg is a
+/// straight line in joint space: every joint moves monotonically, the three
+/// chords agree to within 14.3 deg in seven dimensions, and executing one as a
+/// single straight move costs FOUR controller commands against a budget of 29 --
+/// where RRTConnect's wandering came back needing more than 30 and was rejected
+/// on 31 of 33 solutions across the two runs that evening.
+///
+/// But a straight line is not always the right SHAPE.  The same demonstrations
+/// show the operator finishing the sideways part first and only then pushing in
+/// along the slot axis, because a straight run at the bottle arrives 33 deg
+/// (middle bottle) to 39 deg (lower-shelf place) off that axis and would clip an
+/// upright or a neighbour.  So the sampled path stays a SIBLING, not a fallback:
+/// solvers::MultiPlanner returns the first planner that succeeds, which would
+/// let a straight line that the fence or the collision recheck later rejects
+/// carry off the branch's only solution.  Alternatives plans both and lets the
+/// audit pick the survivor, so this can only add solutions, never remove one.
+std::unique_ptr<mtc::Alternatives> connectAlternatives(
+    const std::string& name, const std::string& group, double timeout,
+    const mtc::solvers::PlannerInterfacePtr& straight,
+    const mtc::solvers::PlannerInterfacePtr& sampling,
+    const std::map<std::string, double>& joint_weights)
+{
+	auto alternatives = std::make_unique<mtc::Alternatives>(name);
+	for (const auto& option : { std::make_pair(std::string("straight"), straight),
+		                        std::make_pair(std::string("sampled"), sampling) })
+	{
+		auto stage = std::make_unique<mtc::stages::Connect>(
+		    name + "_" + option.first,
+		    mtc::stages::Connect::GroupPlannerVector{ { group, option.second } });
+		stage->setTimeout(timeout);
+		// MTC expands solutions best-first by cost, so a weighted path length
+		// steers which branches get explored — not just which one is picked at
+		// the end.  Both siblings are priced the same way, so the straight line
+		// wins on merit rather than on being listed first.
+		if (!joint_weights.empty())
+			stage->setCostTerm(std::make_unique<mtc::cost::PathLength>(joint_weights));
+		alternatives->insert(std::move(stage));
+	}
+	return alternatives;
+}
+
 std::unique_ptr<mtc::SerialContainer> buildPlaceBranch(
     const Scenario& s, const ArmConfig& arm, const std::string& branch_id,
+    const mtc::solvers::PlannerInterfacePtr& straight,
     const mtc::solvers::PlannerInterfacePtr& sampling,
     const mtc::solvers::PlannerInterfacePtr& cartesian,
+    const std::map<std::string, double>& joint_weights,
     mtc::SerialContainer** raw)
 {
 	const std::string p = branch_id + "/";
@@ -663,6 +709,25 @@ std::unique_ptr<mtc::SerialContainer> buildPlaceBranch(
 	{
 		auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>(p + "attach_held_bottle");
 		stage->attachObject(s.bottle_id, arm.ik_link);
+		// The support is a keepout for the ARM, not for the object being set
+		// down on it -- those two are meant to touch.  This used to be relaxed
+		// only after target_approach, and with the bottle hanging ~171 mm below
+		// the TCP its base is under the box top from the hover onwards, so
+		// 2026-08-07 target_preplace_ik failed with "eef in collision:
+		// bottle - fence_shelf_bottom" before any of the insert was planned.
+		//
+		// It has to be here rather than after the Connect: target_preplace_ik
+		// is a GENERATOR, so it reads the monitored stage's scene, and pointing
+		// it at a stage downstream of the Connect deadlocks -- the Connect
+		// needs the generator's states, the generator waits on the Connect.
+		// Tried on 2026-08-07: both came back with 0 solutions and no stage
+		// reporting a failure.
+		// Legacy reconstructed preplace poses overlap the conservative support
+		// slab and need this compatibility relaxation.  A demonstrated route has
+		// an exact gate above the panel, so keep support collision checking active
+		// until its explicit final-contact stage.
+		if (!s.has_target_preplace_pose)
+			stage->allowCollisions(s.bottle_id, s.target_support_surface_id, true);
 		stage->setCallback(
 		    [object_id = s.bottle_id, touch_links = arm.touch_links](
 		        const planning_scene::PlanningScenePtr& scene, const mtc::PropertyMap&) {
@@ -676,21 +741,89 @@ std::unique_ptr<mtc::SerialContainer> buildPlaceBranch(
 		attached_scene = stage.get();
 		branch->insert(std::move(stage));
 	}
+	// Lift clear of the panel before travelling, which is where the operator
+	// starts every placement: "先有一个原地抬升，把瓶子底部抬到货架底板之上，
+	// 然后再运动，最后放下".
+	//
+	// fence_shelf_bottom is a 507 mm keepout slab, not the 2 cm panel, and the
+	// held bottle hangs about 108 mm below the TCP -- so in the carry pose the
+	// bottle is inside that slab.  A single Connect has to rise and advance at
+	// once, and a joint-space straight line does both uniformly, entering the
+	// slab's footprint while still below its top: MoveIt put the first
+	// violation at 5% of that path, contact pair
+	// fence_shelf_bottom <-> held_bottle.  Splitting the rise out means the
+	// Connect starts from a posture that is already clear, which is the only
+	// way its straight-line option can be feasible at all.
+	//
+	// Straight up, so this leg never enters the shelf footprint itself.  The
+	// distance is computed per capture by the scenario generator from the
+	// measured support top, the recorded held TCP and the bottle's own
+	// dimensions; zero means the carry pose already clears the panel.
+	if (s.target_transit_raise_m > 1e-4)
 	{
-		auto stage = std::make_unique<mtc::stages::Connect>(
-		    p + "transport_to_target_preplace",
-		    mtc::stages::Connect::GroupPlannerVector{ { arm.planning_group, sampling } });
-		stage->setTimeout(s.planning_timeout_s);
+		auto stage = std::make_unique<mtc::stages::MoveRelative>(p + "transit_raise", cartesian);
+		stage->setGroup(arm.planning_group);
+		stage->setIKFrame(ik_frame, arm.ik_link);
+		stage->properties().set("marker_ns", p + "transit_raise");
+		stage->setMinMaxDistance(s.target_transit_raise_m * s.cartesian_min_fraction,
+		                         s.target_transit_raise_m);
+		geometry_msgs::msg::Vector3 up;
+		up.x = 0.0;
+		up.y = 0.0;
+		up.z = 1.0;
+		stage->setDirection(stamped(up, s.frame_id));
 		branch->insert(std::move(stage));
 	}
+	{
+		if (s.has_target_preplace_pose)
+		{
+			// The operator already supplied the route shape and the exact slot-mouth
+			// IK branch.  A sampled sibling can only reintroduce the wandering this
+			// route is meant to remove, so the demonstrated path uses one deterministic
+			// joint interpolation and still passes the same collision/audit chain.
+			auto stage = std::make_unique<mtc::stages::Connect>(
+			    p + "transport_to_demonstrated_preplace",
+			    mtc::stages::Connect::GroupPlannerVector{ { arm.planning_group, straight } });
+			stage->setTimeout(s.planning_timeout_s);
+			if (!joint_weights.empty())
+				stage->setCostTerm(std::make_unique<mtc::cost::PathLength>(joint_weights));
+			branch->insert(std::move(stage));
+		}
+		else
+		{
+			branch->insert(connectAlternatives(p + "transport_to_target_preplace",
+			                                   arm.planning_group, s.planning_timeout_s, straight,
+			                                   sampling, joint_weights));
+		}
+	}
+	// The support is a keepout for the ARM.  It is not one for the object the
+	// arm is putting down on it -- those two are going to touch, that is what
+	// placing is.  This relaxation used to sit after target_approach, so the
+	// hover and the whole insertion were still checked against it, and with the
+	// bottle hanging ~171 mm below the TCP its base is under the box top from
+	// the hover onwards: 2026-08-07 target_preplace_ik failed with
+	// "eef in collision: bottle - fence_shelf_bottom" before a single
+	// millimetre of the insert had been planned.
+	//
+	// Deliberately here and not on attach_held_bottle: from the hover down is
+	// the part of the motion that is supposed to meet the support.  Leaving the
+	// transport leg checked keeps the planner from routing the bottle through
+	// the panel on its way across, which is a real collision and not a contact.
 	{
 		auto place = std::make_unique<mtc::SerialContainer>(p + "target_place");
 		place->setProperty("group", arm.planning_group);
 		{
-			auto preplace = s.target_place_pose;
-			preplace.position.x -= s.target_insert_direction.x * s.target_preplace_offset_m;
-			preplace.position.y -= s.target_insert_direction.y * s.target_preplace_offset_m;
-			preplace.position.z -= s.target_insert_direction.z * s.target_preplace_offset_m;
+			auto preplace = s.has_target_preplace_pose ? s.target_preplace_pose :
+			                                              s.target_place_pose;
+			if (!s.has_target_preplace_pose)
+			{
+				preplace.position.x -= s.target_insert_direction.x * s.target_preplace_offset_m;
+				preplace.position.y -= s.target_insert_direction.y * s.target_preplace_offset_m;
+				preplace.position.z -= s.target_insert_direction.z * s.target_preplace_offset_m;
+				preplace.position.x -= s.target_contact_direction.x * s.target_contact_distance_m;
+				preplace.position.y -= s.target_contact_direction.y * s.target_contact_distance_m;
+				preplace.position.z -= s.target_contact_direction.z * s.target_contact_distance_m;
+			}
 			auto generator = std::make_unique<mtc::stages::GeneratePose>(p + "target_preplace_pose");
 			generator->setPose(stamped(preplace, s.frame_id));
 			generator->setMonitoredStage(attached_scene);
@@ -701,14 +834,21 @@ std::unique_ptr<mtc::SerialContainer> buildPlaceBranch(
 			stage->setMaxIKSolutions(static_cast<uint32_t>(s.max_ik_solutions));
 			stage->setMinSolutionDistance(1.0);
 			stage->properties().configureInitFrom(mtc::Stage::INTERFACE, { "target_pose" });
+			const auto& preplace_reference =
+			    s.target_preplace_reference_joints_deg.empty() ?
+			        s.target_place_reference_joints_deg :
+			        s.target_preplace_reference_joints_deg;
+			if (!preplace_reference.empty() && !joint_weights.empty())
+				stage->setCostTerm(referencePostureCost(
+				    preplace_reference, arm.planning_group,
+				    joint_weights));
 			place->insert(std::move(stage));
 		}
 		{
 			auto stage = std::make_unique<mtc::stages::MoveRelative>(p + "target_approach", cartesian);
 			stage->setGroup(arm.planning_group);
 			stage->setIKFrame(ik_frame, arm.ik_link);
-			const double distance = s.target_preplace_offset_m - s.target_contact_distance_m;
-			stage->setMinMaxDistance(distance, distance);
+			stage->setMinMaxDistance(s.target_preplace_offset_m, s.target_preplace_offset_m);
 			stage->setDirection(stamped(s.target_insert_direction, s.frame_id));
 			place->insert(std::move(stage));
 		}
@@ -723,7 +863,7 @@ std::unique_ptr<mtc::SerialContainer> buildPlaceBranch(
 			stage->setGroup(arm.planning_group);
 			stage->setIKFrame(ik_frame, arm.ik_link);
 			stage->setMinMaxDistance(s.target_contact_distance_m, s.target_contact_distance_m);
-			stage->setDirection(stamped(s.target_insert_direction, s.frame_id));
+			stage->setDirection(stamped(s.target_contact_direction, s.frame_id));
 			place->insert(std::move(stage));
 		}
 		{
@@ -736,7 +876,19 @@ std::unique_ptr<mtc::SerialContainer> buildPlaceBranch(
 			place->insert(std::move(stage));
 		}
 		{
-			auto stage = std::make_unique<mtc::stages::MoveRelative>(p + "target_retreat", cartesian);
+			auto stage = std::make_unique<mtc::stages::MoveRelative>(p + "target_lift", cartesian);
+			stage->setGroup(arm.planning_group);
+			stage->setIKFrame(ik_frame, arm.ik_link);
+			stage->setMinMaxDistance(s.target_contact_distance_m, s.target_contact_distance_m);
+			geometry_msgs::msg::Vector3 lift_direction;
+			lift_direction.x = -s.target_contact_direction.x;
+			lift_direction.y = -s.target_contact_direction.y;
+			lift_direction.z = -s.target_contact_direction.z;
+			stage->setDirection(stamped(lift_direction, s.frame_id));
+			place->insert(std::move(stage));
+		}
+		{
+			auto stage = std::make_unique<mtc::stages::MoveRelative>(p + "target_exit", cartesian);
 			stage->setGroup(arm.planning_group);
 			stage->setIKFrame(ik_frame, arm.ik_link);
 			stage->setMinMaxDistance(s.target_retreat_distance_m, s.target_retreat_distance_m);
@@ -773,13 +925,15 @@ std::unique_ptr<mtc::SerialContainer> buildPlaceBranch(
 std::unique_ptr<mtc::SerialContainer> buildArmBranch(const Scenario& s, const ArmConfig& arm,
                                                      const grabber_mtc::GraspCandidate& grasp,
                                                      const std::string& branch_id,
+                                                     const mtc::solvers::PlannerInterfacePtr& straight,
                                                      const mtc::solvers::PlannerInterfacePtr& sampling,
                                                      const mtc::solvers::PlannerInterfacePtr& cartesian,
                                                      const std::map<std::string, double>& joint_weights,
                                                      mtc::SerialContainer** raw)
 {
 	if (s.place_only)
-		return buildPlaceBranch(s, arm, branch_id, sampling, cartesian, raw);
+		return buildPlaceBranch(
+		    s, arm, branch_id, straight, sampling, cartesian, joint_weights, raw);
 
 	const std::string p = branch_id + "/";
 	const Eigen::Isometry3d ik_frame = tcpFrame(arm);
@@ -805,20 +959,12 @@ std::unique_ptr<mtc::SerialContainer> buildArmBranch(const Scenario& s, const Ar
 
 	// --- free space: current state -> start of the source approach ---------
 	{
-		auto stage = std::make_unique<mtc::stages::Connect>(
-		    p + "connect_to_source_pregrasp",
-		    mtc::stages::Connect::GroupPlannerVector{ { arm.planning_group, sampling } });
-		stage->setTimeout(s.planning_timeout_s);
 		// The long free-space leg is where the audit used to discard nearly
-		// everything. Joint constraints are sampled natively by OMPL (unlike a
-		// TCP pose box, which forces projection sampling), so this narrows the
-		// search instead of filtering its output.
-		// MTC expands solutions best-first by cost, so a weighted path length
-		// steers which branches get explored — not just which one is picked at
-		// the end. Keeping RRTConnect means this costs no extra planning time.
-		if (!joint_weights.empty())
-			stage->setCostTerm(std::make_unique<mtc::cost::PathLength>(joint_weights));
-		branch->insert(std::move(stage));
+		// everything -- see connectAlternatives for what the demonstrations say
+		// about its shape and why both options are planned rather than one.
+		branch->insert(connectAlternatives(p + "connect_to_source_pregrasp",
+		                                   arm.planning_group, s.planning_timeout_s, straight,
+		                                   sampling, joint_weights));
 	}
 
 	mtc::Stage* attach_stage = nullptr;
@@ -984,10 +1130,9 @@ std::unique_ptr<mtc::SerialContainer> buildArmBranch(const Scenario& s, const Ar
 	}
 	else
 	{
-		auto stage = std::make_unique<mtc::stages::Connect>(
-		    p + "transport", mtc::stages::Connect::GroupPlannerVector{ { arm.planning_group, sampling } });
-		stage->setTimeout(s.planning_timeout_s);
-		branch->insert(std::move(stage));
+		branch->insert(connectAlternatives(p + "transport", arm.planning_group,
+		                                   s.planning_timeout_s, straight, sampling,
+		                                   joint_weights));
 	}
 
 	// --- target shelf: insert, place, open, detach, retreat ----------------
@@ -1096,6 +1241,13 @@ ArmResult collectArmResult(const ArmConfig& arm, const std::string& branch_id,
 			return true;
 		if (first_failed_leaf.empty())
 			first_failed_leaf = stage.name();
+		// The count alone cannot tell a collision apart from an unreachable goal,
+		// and that difference decides whether the fix is the scene or the path.
+		// Failure solutions only exist when introspection kept them.
+		RCLCPP_WARN(LOGGER, "stage %s: %u failures%s%s", stage.name().c_str(),
+		            stage.numFailures(), stage.failures().empty() ? "" : ", first: ",
+		            stage.failures().empty() ? "" :
+		                                       stage.failures().front()->comment().c_str());
 		return true;
 	});
 	result.earliest_failure_stage = first_failed_leaf;
@@ -1236,9 +1388,9 @@ grabber_mtc::PlaceTrajectoryExport exportPlaceTrajectory(
 	for (const auto& sub : message.sub_trajectory)
 		if (!sub.trajectory.joint_trajectory.points.empty())
 			segments.push_back(&sub.trajectory.joint_trajectory);
-	if (segments.size() != 5)
-		throw std::runtime_error("place-only export expected five motion segments "
-		                         "(transport, approach, contact, retreat, home), got " +
+	if (segments.size() != 6)
+		throw std::runtime_error("place-only export expected six motion segments "
+		                         "(transport, approach, contact, lift, exit, home), got " +
 		                         std::to_string(segments.size()));
 
 	grabber_mtc::PlaceTrajectoryExport out;
@@ -1301,6 +1453,7 @@ grabber_mtc::PlaceTrajectoryExport exportPlaceTrajectory(
 	out.release_point_index = release;
 	append(*segments[3]);
 	append(*segments[4]);
+	append(*segments[5]);
 	out.phases.push_back({ "retreat", release, out.points.size() - 1 });
 	validateTrajectoryTiming(out.points, "place-only");
 	return out;
@@ -1582,6 +1735,25 @@ int main(int argc, char** argv)
 		auto sampling = std::make_shared<mtc::solvers::PipelinePlanner>(node);
 		sampling->setPlannerId(scenario.planner_id);
 		sampling->setTimeout(scenario.planning_timeout_s);
+		// RRTConnect stops at its FIRST solution, and one raw RRTConnect path
+		// across this workspace wanders: the free-space leg came back with 841
+		// to 2596 weighted degrees of travel where the one solution that ever
+		// passed the audit used 498.  That length is what the audit rejects --
+		// a path that long cannot compress into the controller's 30-command
+		// connected queue no matter how it is timed, so controller_safe was
+		// false on 15 of 15 solutions in the 2026-08-06 19:47 run and on all 16
+		// in the 20:10 one.  Asking OMPL for several attempts makes it hybridize
+		// and simplify across them and return the shortest, which is the same
+		// path a person would call the obvious one.  Attempts run in parallel
+		// threads, so this buys a shorter path with almost no extra wall time.
+		sampling->setProperty("num_planning_attempts", 8u);
+
+		// The demonstrated shape of the free-space leg; see connectAlternatives.
+		auto straight = std::make_shared<mtc::solvers::JointInterpolationPlanner>();
+		// The default 0.1 rad between collision-checked states is 5.7 deg, coarse
+		// enough to step over a shelf upright.  1.15 deg costs nothing on a leg
+		// this short, and every waypoint is checked against the live scene.
+		straight->setProperty("max_step", 0.02);
 
 		// Deterministic straight lines for the shelf-mouth segments.
 		auto cartesian = std::make_shared<mtc::solvers::CartesianPath>();
@@ -1674,8 +1846,8 @@ int main(int argc, char** argv)
 				mtc::SerialContainer* raw = nullptr;
 				const std::string branch_id = arm->arm_id + "__" + candidate.id;
 				alternatives->insert(
-				    buildArmBranch(scenario, *arm, candidate, branch_id, sampling, local_motion,
-				                   jointCostWeights(scenario, *model, *arm), &raw));
+				    buildArmBranch(scenario, *arm, candidate, branch_id, straight, sampling,
+				                   local_motion, jointCostWeights(scenario, *model, *arm), &raw));
 				planned_branches.push_back({ &*arm, branch_id, candidate.id, raw });
 			}
 		}
@@ -1688,9 +1860,21 @@ int main(int argc, char** argv)
 				throw std::runtime_error("place-only planning_arm_id is not present in arm config");
 			mtc::SerialContainer* raw = nullptr;
 			const std::string branch_id = arm->arm_id + "__place";
+			// Place used to be handed empty weights, and an empty table turns
+			// off two things at once without saying so: the weighted path
+			// length that steers MTC's best-first expansion toward a short
+			// free-space leg, and -- because referencePostureCost is gated on
+			// the same table -- the demonstrated place posture that the row
+			// template carries all the way here as
+			// target_place_reference_joints_deg.  So the leg with the WORST
+			// geometry of the four demonstrated (36-39 deg off the slot axis,
+			// against 12 deg for a right-side pick) was the only one planning
+			// with no guidance at all.  Same weights as the pick; the default
+			// table is per-scenario and already sized to this group.
 			alternatives->insert(buildArmBranch(
 			    scenario, *arm, scenario.source_grasp_candidates.front(), branch_id,
-			    sampling, local_motion, {}, &raw));
+			    straight, sampling, local_motion,
+			    jointCostWeights(scenario, *model, *arm), &raw));
 			planned_branches.push_back(
 			    { &*arm, branch_id, scenario.source_grasp_candidates.front().id, raw });
 		}
@@ -1704,8 +1888,9 @@ int main(int argc, char** argv)
 					continue;
 				mtc::SerialContainer* raw = nullptr;
 				alternatives->insert(
-				    buildArmBranch(scenario, arm, candidate, arm.arm_id, sampling, local_motion,
-				                   {}, &raw));
+				    buildArmBranch(scenario, arm, candidate, arm.arm_id, straight, sampling,
+				                   local_motion, jointCostWeights(scenario, *model, arm),
+				                   &raw));
 				planned_branches.push_back({ &arm, arm.arm_id, candidate.id, raw });
 			}
 			if (planned_branches.empty())

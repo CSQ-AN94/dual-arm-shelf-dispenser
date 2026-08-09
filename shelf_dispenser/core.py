@@ -67,6 +67,9 @@ class DemoParams:
     # 2026-07-19 supervised adjustment: 4 cm was slightly too shallow; move
     # 1 cm farther toward the bottle while retaining 3 cm against over-insertion.
     grasp_stop_short_m: float = 0.030
+    # Live depth and row teaching can differ by a few millimetres, but a row
+    # template must never move the perceived grasp to its old absolute XYZ.
+    localized_grasp_geometry_tolerance_m: float = 0.015
     pregrasp_standoff_m: float = 0.085
     # The observation wrist pose can be collision-free while a direct
     # observation->pregrasp interpolation still sweeps the rotating hand down
@@ -170,8 +173,14 @@ class DemoParams:
     shelf_fit_max_gap_m: float = 0.35
     shelf_fit_lateral_radius_m: float = 0.35
     shelf_fit_min_inliers: int = 40
+    # PCA 拟合面的法向必须与该货架面的期望轴至少同向到此余弦值；防止把
+    # 竖直背板的一条横带误认成 shelf_bottom/shelf_top 等水平面。
+    shelf_fit_min_normal_alignment: float = 0.90
     shelf_fit_bound_tolerance_m: float = 0.05
     shelf_fit_edge_margin_m: float = 0.03
+    # 底板是瓶子的接触支撑面；90 分位已经取了点云的上沿，不能再把围栏向
+    # 可抓空间额外抬高。保留独立旋钮，只有新一轮实测证明需要时才增加。
+    shelf_bottom_fit_conservative_margin_m: float = 0.0
     shelf_fit_conservative_margin_m: float = 0.01
     # 视觉选目标：给定时只在这些 YOLO 类别名里选（按商品识别选格位）；不给
     # 则保持现状——detector.aliases 里的通用瓶子类别，桌面 demo 行为不变。
@@ -297,11 +306,13 @@ class DemoParams:
     # 基线（pos≈0）的抖动量级，远低于张开位（pos≈900），足以只在真正张开
     # 时触发。--finish-from-current 场景假设夹爪已抓着水瓶，跳过这一步。
     gripper_pretransit_open_threshold: int = 100
-    # 空夹基线的静态回退值（2026-07-16 实测 pos~=394）。每次运行会在自由
-    # 空间重新实测基线（RobotSession.calibrate_empty_close），静态值只在
-    # 没标定成功时兜底。余量取 6：2026-07-15 实测抓稳的窄金属瓶只比空夹
-    # 基线高 8，旧余量 35 把真实成功误判成空夹。
-    gripper_empty_closed_position: int = 394
+    # 空夹基线没有静态兜底值。曾经有一个（2026-07-16 实测 pos~=394），它在
+    # 2026-08-04 把一次真实抓取（pos=100、state=3、current=101，本轮实测基线
+    # 是 0）判成空夹，而前一次运行以 pos=403 压着同一个 394 过线，只多 3 个
+    # 计数——那不是验证通过，是运气。基线只能来自本轮实测
+    # （RobotSession.calibrate_empty_close）或标定证据，缺了就拒绝判定。
+    # 余量取 6：2026-07-15 实测抓稳的窄金属瓶只比空夹基线高 8，旧余量 35
+    # 把真实成功误判成空夹。
     gripper_object_margin: int = 6
 
 

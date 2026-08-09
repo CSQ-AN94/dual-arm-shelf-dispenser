@@ -58,7 +58,6 @@ def build_args(cli) -> SimpleNamespace:
         confirm_before_grasp=False,
         place_back=False,
         return_home=False,
-        restore_teleop=False,
         resume_at_wrist=False,
         finish_from_current=False,
         target_product=None,

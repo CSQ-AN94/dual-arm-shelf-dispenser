@@ -10,7 +10,7 @@
 # 失败就是真失败。
 #
 # 用法（在机器人上）：
-#   bash scripts/run_cross_layer_cycle.sh
+#   PRODUCT_CODE=P01 bash scripts/run_cross_layer_cycle.sh
 #
 # 跑之前先在 Mac 上确认机器人跑的是同一份代码：
 #   python scripts/robot_code_drift.py --push
@@ -21,6 +21,13 @@ G=${SHELF_ROOT:-/home/rm/dual-arm-shelf-dispenser}
 PY=${SHELF_PYTHON:-/home/rm/miniconda3/envs/tube_vision/bin/python3}
 O=${CYCLE_OUT:-/home/rm/cycle}
 SPEED=${CYCLE_SPEED:-100}
+ROW_TEMPLATES=${ROW_TEMPLATES:-$G/outputs/row_templates.json}
+PRODUCT_CODE=${PRODUCT_CODE:-}
+
+case "$PRODUCT_CODE" in
+  P01|P02|P03|P04|P05|P06) ;;
+  *) echo "拒绝: 必须用 PRODUCT_CODE=P01..P06 指明当前瓶型" >&2; exit 1 ;;
+esac
 
 # $O gets wiped, so only ever wipe a directory this script created.  Comparing
 # against $HOME or the repo path is not enough -- it depends on who is running
@@ -33,35 +40,59 @@ if [ -e "$O" ] && [ ! -f "$MARKER" ]; then
   exit 1
 fi
 rm -rf "$O"; mkdir -p "$O"; touch "$MARKER"
-say(){ echo; echo "########## $* ##########"; }
+# Timestamped, and flushed as it happens: watching this file with `tail -f` is
+# how an operator standing at the robot can tell "still planning" from "hung",
+# and the per-stage clock is what turns "the retract feels slow" into a number.
+CYCLE_STARTED=$(date +%s)
+say(){
+  echo
+  echo "########## [$(date +%H:%M:%S) +$(( $(date +%s) - CYCLE_STARTED ))s] $* ##########"
+}
 fail(){ echo "  失败: $(grep -E '拒绝|SafetyAbort' "$1" | tail -1)"; tail -4 "$1"; echo CYCLE_DONE; exit 1; }
+
+source_mtc_workspace(){
+  # colcon's generated setup reads optional variables such as COLCON_TRACE.
+  # Temporarily relax nounset while sourcing it, then restore this script's gate.
+  set +u
+  source /opt/ros/humble/setup.bash
+  source /home/rm/ros2_ws/install/setup.bash
+  source "$G/mtc_ws/install/setup.bash"
+  SOURCE_STATUS=$?
+  set -u
+  return "$SOURCE_STATUS"
+}
 
 # Own the read-only joint-state + move_group stack this workflow depends on.
 # The MTC planner launch below deliberately starts only the planner node.
 STACK_PID=""
 cleanup_stack(){
   [ -n "$STACK_PID" ] || return 0
-  if kill -0 "$STACK_PID" 2>/dev/null; then
-    kill -INT "$STACK_PID" 2>/dev/null || true
+  if kill -0 -- "-$STACK_PID" 2>/dev/null; then
+    kill -INT -- "-$STACK_PID" 2>/dev/null || true
     for _ in {1..24}; do
-      kill -0 "$STACK_PID" 2>/dev/null || break
+      kill -0 -- "-$STACK_PID" 2>/dev/null || break
       sleep 0.5
     done
-    kill -TERM "$STACK_PID" 2>/dev/null || true
+    kill -TERM -- "-$STACK_PID" 2>/dev/null || true
   fi
   wait "$STACK_PID" 2>/dev/null || true
   STACK_PID=""
 }
 trap cleanup_stack EXIT
 
+[ -f "$ROW_TEMPLATES" ] || {
+  echo "拒绝: 找不到行抓取模板 $ROW_TEMPLATES" >&2
+  exit 1
+}
+
 start_stack(){
   STACK_LABEL=$1
   say "启动只规划 MoveIt 栈（$STACK_LABEL）"
-  cd "$G/mtc_ws" && source install/setup.bash
+  cd "$G/mtc_ws" && source_mtc_workspace
   BRIDGE_STATUS="$O/bridge_status_$STACK_LABEL.json"
   STACK_LOG="$O/moveit_stack_$STACK_LABEL.log"
   rm -f "$BRIDGE_STATUS"
-  ros2 launch grabber_robot_state_bridge live_state_plan_only.launch.py \
+  setsid ros2 launch grabber_robot_state_bridge live_state_plan_only.launch.py \
     bridge_status_file:="$BRIDGE_STATUS" > "$STACK_LOG" 2>&1 &
   STACK_PID=$!
   STACK_READY=0
@@ -117,11 +148,20 @@ for i in 1 2 3 4 5 6; do
   cd "$G"
   $PY scripts/calibrate_mtc_gripper.py --record "$O/grip.json" --execute > "$O/cal$i.log" 2>&1 \
     || { echo "    夹爪标定失败: $(grep -E '拒绝|SafetyAbort' "$O/cal$i.log" | tail -1)"; continue; }
-  $PY scripts/capture_mtc_direct_pick_scene.py --scenario-out "$O/p$i.yaml" > "$O/pc$i.log" 2>&1 \
+  $PY scripts/capture_mtc_direct_pick_scene.py --target-product "$PRODUCT_CODE" \
+    --scenario-out "$O/p$i.yaml" > "$O/pc$i.log" 2>&1 \
     || { echo "    采集失败: $(grep -E '拒绝|Error' "$O/pc$i.log" | tail -1)"; continue; }
-  cd "$G/mtc_ws" && source install/setup.bash
+  $PY scripts/apply_demonstrated_grasp_to_scenario.py "$O/p$i.yaml" \
+    --row-templates "$ROW_TEMPLATES" --layer upper --output "$O/p$i.yaml" > "$O/pt$i.log" 2>&1 \
+    || { echo "    行模板匹配失败: $(tail -1 "$O/pt$i.log")"; continue; }
+  cd "$G/mtc_ws" && source_mtc_workspace
   rm -f "$O/p$i.json"*
-  ros2 launch grabber_mtc_planner plan_shelf_transfer_experimental.launch.py \
+  # A dropped /get_planning_scene response leaves the planner waiting forever
+  # -- 2026-08-06 20:10 attempt 3 sat there until it was killed by hand, and
+  # the retry loop above it never got its turn.  A planning attempt that has
+  # not answered in four minutes is a failed attempt, not a slow one.
+  timeout -k 10 240 \
+    ros2 launch grabber_mtc_planner plan_shelf_transfer_experimental.launch.py \
     scenario:="$O/p$i.yaml" out:="$O/p$i.json" hold_seconds:=0 > "$O/pp$i.log" 2>&1 || true
   [ -f "$O/p$i.json" ] || { echo "    规划无结果"; continue; }
   if [ "$($PY -c "import json;print(json.load(open('$O/p$i.json')).get('solved'))")" != "True" ]; then
@@ -142,10 +182,18 @@ done
 [ "$PICKED" = 1 ] || { echo "抓取阶段失败"; echo CYCLE_DONE; exit 1; }
 cleanup_stack
 
-say "阶段 2.5  持瓶回收拢位（升降契约要求的姿态，并把到位证据写回 pick 记录）"
+# carry_home's target IS grasp_start_right_joints_deg -- the same pose
+# normalize_right_arm drives to.  The difference was everything around it:
+# normalize_to_grasp_start re-centres the head first, so it loads the YOLO
+# archive and opens the RealSense to move an arm to a taught joint pose that
+# needs no perception at all.  Measured 2026-08-07 on identical dry runs:
+# 16 s against 1 s.  Both arms of the cycle retract, so it is twice that.
+# The tuck evidence this used to stamp into the pick record now only feeds the
+# lift's advisory block, which no longer gates anything.
+say "阶段 2.5  持瓶回收拢位（无相机通路）"
 cd "$G"
-if $PY scripts/normalize_to_grasp_start.py --target carry_home \
-    --pick-record "$O/pick_record.json" --execute > "$O/tuck.log" 2>&1; then
+if $PY scripts/normalize_right_arm.py --skip-lift --speed 30 \
+    --execute > "$O/tuck.log" 2>&1; then
   echo "  OK"
 else
   fail "$O/tuck.log"
@@ -166,14 +214,24 @@ say "阶段 4  放置（空位+场景+规划+执行 都在同一次尝试内）"
 for i in 1 2 3 4 5; do
   echo "  --- 尝试 $i ---"
   cd "$G"
+  # The y span used to be 0.58..0.72 -- 140 mm -- against delivery_table's
+  # 100 mm table_edge_margin_m, which is subtracted from BOTH sides.  That left
+  # arange(0.68, 0.62): empty, so every place attempt died on "no candidate
+  # region" before looking at a single point.  2026-08-07 with 0.50..0.85 the
+  # same scene produced two candidates immediately, at y=0.700 and y=0.740 --
+  # note the second was outside the old window entirely.  The margin itself is
+  # a table default (do not place near an edge you can push a bottle off); a
+  # shelf bin's edges are panels, and its measured depth is close to 330 mm.
   $PY scripts/capture_empty_shelf_places.py --expected-lift-mm 250 \
-    --roi-min -0.40 0.58 -0.45 --roi-max 0.23 0.72 0.05 \
+    --product-code "$PRODUCT_CODE" \
+    --roi-min -0.40 0.50 -0.45 --roi-max 0.23 0.85 0.05 \
     --lift-execution-record "$O/lift_record.json" \
     --output "$O/pl$i.json" > "$O/plc$i.log" 2>&1 \
     || { echo "    空位采集失败: $(grep -E '拒绝|Error' "$O/plc$i.log" | tail -1)"; continue; }
-  $PY scripts/empty_shelf_places_to_mtc_scenario.py "$O/pl$i.json" "$O/pls$i.yaml" > "$O/plg$i.log" 2>&1 \
+  $PY scripts/empty_shelf_places_to_mtc_scenario.py "$O/pl$i.json" "$O/pls$i.yaml" \
+    --product-code "$PRODUCT_CODE" --row-templates "$ROW_TEMPLATES" > "$O/plg$i.log" 2>&1 \
     || { echo "    场景生成失败: $(tail -1 "$O/plg$i.log")"; continue; }
-  cd "$G/mtc_ws" && source install/setup.bash
+  cd "$G/mtc_ws" && source_mtc_workspace
   rm -f "$O/pls${i}_res.json"*
   ros2 launch grabber_mtc_planner plan_shelf_transfer_experimental.launch.py \
     scenario:="$O/pls$i.yaml" out:="$O/pls${i}_res.json" hold_seconds:=0 > "$O/plp$i.log" 2>&1 || true

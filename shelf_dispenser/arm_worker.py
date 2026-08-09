@@ -31,9 +31,19 @@ import numpy as np
 
 from .core import SafetyAbort, interpolate_joint_path
 
-# Methods the parent may invoke on a worker-owned arm.  Read-only queries and
-# the taught-pose motion path; anything that would need a live camera, a scene
-# or the gripper's force loop stays with the primary arm for now.
+# Methods the parent may invoke on a worker-owned arm.  Read-only queries, the
+# taught-pose motion path, and the full gripper cycle.
+#
+# Closing used to sit outside this boundary "until the left tool has real grasp
+# evidence".  That was circular: closing once is how the evidence gets made.
+# The whitelist is also the wrong instrument for it -- what an unvalidated tool
+# transform gets wrong is *where the TCP goes*, which the fence and the planner
+# judge, not whether fingers may shut.  Grasping itself is judged by RM Plus
+# feedback, and that reads the same on either arm.
+#
+# calibrate_empty_close is admitted with close_gripper, not as a convenience:
+# validate_holding_gripper_feedback refuses outright without this round's
+# measured empty-close baseline, so the grasp command is unusable alone.
 ALLOWED_METHODS = frozenset(
     {
         "joints_deg",
@@ -47,6 +57,10 @@ ALLOWED_METHODS = frozenset(
         "assert_arm_healthy",
         "controller_fence_status",
         "gripper_state",
+        "open_gripper",
+        "calibrate_empty_close",
+        "close_gripper",
+        "close_empty_gripper",
     }
 )
 

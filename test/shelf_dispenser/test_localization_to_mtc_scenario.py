@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -22,6 +24,16 @@ SPEC = importlib.util.spec_from_file_location("localization_to_mtc", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
+
+
+def test_fixed_head_capture_cli_imports_current_task_arguments():
+    result = subprocess.run(
+        [sys.executable, str(CAPTURE_SCRIPT), "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_historical_localization_reproduces_real_trace_geometry():
@@ -159,6 +171,11 @@ def test_fixed_head_pick_only_keeps_non_target_obstacles_and_shelf_geometry():
     assert scenario["fixture_source"] is False
     assert scenario["source_lift_direction"] == [0.0, 0.0, 1.0]
     assert scenario["source_lift_distance_m"] > 0.0
+    assert scenario["bottle"]["height_m"] == pytest.approx(0.217)
+    assert scenario["bottle"]["graspable_cylinder_height_m"] == pytest.approx(
+        0.175
+    )
+    assert 0.69 * 0.217 > 0.217 - 0.175
     assert scenario["source_pregrasp_offset_m"] == pytest.approx(0.085)
     assert scenario["source_contact_distance_m"] == pytest.approx(0.072)
     assert "post_pick_carry_joints_deg" not in scenario
@@ -415,3 +432,25 @@ if __name__ == "__main__":
     test_left_pick_only_does_not_reuse_the_right_arm_taught_staging_pose()
     test_non_pick_flow_keeps_the_wrist_camera_depth_limit()
     print("localization_to_mtc_scenario: PASS")
+
+
+def test_target_cylinder_margin_covers_a_voxel_corner():
+    """A cube can point a corner at the axis; half a voxel is not enough radially.
+
+    2026-08-07: voxels centred just outside pick_radius + voxel/2 survived the
+    filter and still collided with the bottle the moment it was attached.
+    """
+    import math
+
+    voxel_size = 0.025
+    bottle_radius = 0.033
+    face_margin = voxel_size / 2.0
+    corner_margin = voxel_size / math.sqrt(2.0)
+    assert corner_margin > face_margin
+
+    # A voxel centre this far out is outside the old cylinder ...
+    centre_distance = bottle_radius + face_margin + 0.001
+    # ... yet its nearest corner is inside the bottle.
+    assert centre_distance - corner_margin < bottle_radius
+    # The corrected cylinder catches it.
+    assert centre_distance <= bottle_radius + corner_margin

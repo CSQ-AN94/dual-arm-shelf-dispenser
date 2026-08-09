@@ -7,6 +7,7 @@ from typing import Sequence
 import numpy as np
 
 from .core import DemoParams, Localization, SafetyAbort
+from .shelf_model import fitted_panel_mask
 
 
 def _base_points(
@@ -91,6 +92,7 @@ def build_scene_voxels(
     max_depth_m: float | None = None,
     bottom_crop: int | None = None,
     max_voxels: int | None = None,
+    shelf_faces: dict | None = None,
 ) -> list[list[float]]:
     """Return occupied voxel centers in the right-arm base frame.
 
@@ -122,7 +124,12 @@ def build_scene_voxels(
         (np.linalg.norm(relative[:, :2], axis=1) < 0.95)
         & (np.abs(relative[:, 2]) < 0.75)
     )
+    # Same mask as the other two fields.  localization_to_mtc_scenario requires
+    # scene == target | non_target, so a panel point may not be dropped from one
+    # classification and kept in another; dropping it from all three before any
+    # of them is voxelized keeps that invariant true by construction.
     points = points[valid_workspace]
+    points = points[~fitted_panel_mask(points, shelf_faces or {})]
     if points.size == 0:
         return []
 
@@ -178,9 +185,84 @@ def _target_point_mask(
         <= foreground_tolerance
     )
     # The detector box already bounds the bottle vertically. This matters for
-    # shelf grasps, whose lock is 40% down the box: the lower bottle body can
-    # extend far beyond the legacy 5.5 cm table-grasp band.
+    # shelf grasps, whose lock uses the shelf profile's taught box fraction:
+    # the lower bottle body can extend beyond the legacy table-grasp band.
     return in_box & in_depth & in_lateral
+
+
+def _support_plane_z(shelf_faces: dict) -> float | None:
+    """The measured shelf floor, if this round fitted one."""
+    fit = (shelf_faces or {}).get("shelf_bottom")
+    return None if fit is None else float(fit.plane_m)
+
+
+def drop_floating_fragments(
+    centers: Sequence[Sequence[float]],
+    voxel_m: float,
+    *,
+    support_z: float | None,
+    bottle_height_m: float,
+) -> tuple[list[list[float]], int]:
+    """Delete clusters that are both too short to be a bottle and unsupported.
+
+    This filter was refused for weeks, and the reason was sound: dropping small
+    connected components deletes a lipstick or a small box along with the noise,
+    and deleting a real obstacle is the one failure this scene must never have.
+    2026-08-07 the operator fixed the domain -- this shelf only ever holds
+    drinks -- which is what makes the judgement available.  A bottle is
+    diameter 66 by 217 mm: dozens of cells at 25 mm, and it stands ON the panel.
+    A cluster shorter than half a bottle that also floats clear of the panel is
+    not a short bottle, because there is no such thing here.
+
+    BOTH conditions are required.  Short-but-supported could be a bottle seen
+    edge-on through a bad frame, and tall-but-floating is more likely a real
+    object whose lower half the arm occluded.  Only the pair is safe.
+
+    2026-08-07 evidence: of 1120 voxels in a pick scene, 1111 were two side
+    structures half a metre from the target and the remaining 9 were three
+    floating blobs of 6, 2 and 1 cells.  Two of them sat 70 mm and 85 mm from
+    the straight-line approach corridor, inside the open gripper's 151 mm
+    envelope, at the very start of the path -- where the collision probe had
+    already put the first violation, at 5%.
+
+    Returns the survivors and how many cells were dropped.  A deletion nobody
+    counts is how this quietly starts eating real obstacles.
+    """
+    array = np.asarray(centers, dtype=float)
+    if array.size == 0 or support_z is None:
+        return [list(map(float, c)) for c in array], 0
+
+    keys = {}
+    for index, centre in enumerate(array):
+        keys[tuple(np.round(centre / voxel_m).astype(int))] = index
+
+    seen: set = set()
+    keep = np.ones(len(array), dtype=bool)
+    dropped = 0
+    for key in keys:
+        if key in seen:
+            continue
+        stack, group = [key], []
+        seen.add(key)
+        while stack:
+            current = stack.pop()
+            group.append(keys[current])
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        nxt = (current[0] + dx, current[1] + dy, current[2] + dz)
+                        if nxt in keys and nxt not in seen:
+                            seen.add(nxt)
+                            stack.append(nxt)
+        cluster = array[group]
+        height = float(cluster[:, 2].max() - cluster[:, 2].min())
+        base_gap = float(cluster[:, 2].min()) - support_z
+        too_short = height < bottle_height_m / 2.0
+        floating = base_gap > 1.5 * voxel_m
+        if too_short and floating:
+            keep[group] = False
+            dropped += len(group)
+    return [list(map(float, c)) for c in array[keep]], dropped
 
 
 def build_non_target_scene_voxels(
@@ -194,8 +276,17 @@ def build_non_target_scene_voxels(
     max_depth_m: float | None = None,
     bottom_crop: int | None = None,
     max_voxels: int | None = None,
+    shelf_faces: dict | None = None,
+    stats: dict | None = None,
 ) -> list[list[float]]:
-    """Voxelize non-target points without deleting mixed target/obstacle cells."""
+    """Voxelize non-target points without deleting mixed target/obstacle cells.
+
+    ``shelf_faces`` are this round's measured panel fits.  Points they already
+    account for are dropped before voxelizing -- see ``fitted_panel_mask`` for
+    why keeping them made the field worse than the fence it duplicates.  How
+    many were dropped goes into ``stats``: a deletion nobody counts is how a
+    filter quietly starts eating real obstacles.
+    """
     if depth is None or K is None:
         raise SafetyAbort("非目标障碍场景缺少深度或内参")
     points, u, v, camera_points = _base_points(
@@ -217,9 +308,23 @@ def build_non_target_scene_voxels(
         points, u, v, camera_points, localization, params
     )
     points = points[valid_workspace & ~target_samples]
+    panel = fitted_panel_mask(points, shelf_faces or {})
+    if stats is not None:
+        stats["panel_points_removed"] = int(panel.sum())
+        stats["points_kept"] = int(len(points) - panel.sum())
+    points = points[~panel]
     if points.size == 0:
         return []
-    return voxelize_scene_points(points, params, max_voxels=max_voxels)
+    centers = voxelize_scene_points(points, params, max_voxels=max_voxels)
+    kept, dropped = drop_floating_fragments(
+        centers,
+        params.scene_voxel_m,
+        support_z=_support_plane_z(shelf_faces or {}),
+        bottle_height_m=params.held_bottle_height_m,
+    )
+    if stats is not None:
+        stats["floating_fragments_removed"] = dropped
+    return kept
 
 
 def voxelize_scene_points(
@@ -274,6 +379,7 @@ def build_target_occupancy_voxels(
     min_depth_m: float | None = None,
     max_depth_m: float | None = None,
     bottom_crop: int | None = None,
+    shelf_faces: dict | None = None,
 ) -> list[list[float]]:
     """Record scene cells supported by target-associated depth samples.
 
@@ -294,11 +400,13 @@ def build_target_occupancy_voxels(
         max_depth_m=max_depth_m,
         bottom_crop=bottom_crop,
     )
-    target_points = points[
-        _target_point_mask(
-            points, u, v, camera_points, localization, params
-        )
-    ]
+    # The panel mask runs on all three fields or none; see build_scene_voxels.
+    # A bottle's lowest cells can sit inside the panel slab, and keeping them
+    # here while the scene drops them breaks scene == target | non_target.
+    keep = _target_point_mask(
+        points, u, v, camera_points, localization, params
+    ) & ~fitted_panel_mask(points, shelf_faces or {})
+    target_points = points[keep]
     if target_points.size == 0:
         return []
     keys = np.floor(target_points / params.scene_voxel_m).astype(np.int32)

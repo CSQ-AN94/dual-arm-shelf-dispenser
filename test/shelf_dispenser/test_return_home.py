@@ -160,7 +160,6 @@ def test_finish_from_current_skips_localization_and_grasp():
     demo.args = type("Args", (), {})()
     demo.args.place_back = True
     demo.args.return_home = True
-    demo.args.restore_teleop = False
     demo.stop_event = __import__("threading").Event()
     demo.stop_event.set()  # exit the hold loop immediately
     demo._place_back = lambda: calls.append(("place_back",))

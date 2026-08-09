@@ -21,8 +21,10 @@ from shelf_dispenser.arm import RobotSession
 def _session(feedback: dict, baseline: int | None):
     session = RobotSession.__new__(RobotSession)
     session.take_control = True
-    if baseline is not None:
-        session.empty_close_pos = baseline
+    # __init__ always sets this, to None until calibration lands.  The helper
+    # mirrors that, so baseline=None is a real uncalibrated session rather than
+    # an attribute that happens to be missing.
+    session.empty_close_pos = baseline
     session._command_gripper_position = lambda *a, **k: feedback
     return session
 
@@ -165,10 +167,22 @@ def test_close_at_baseline_is_still_an_empty_grasp():
         session.close_gripper(DemoParams())
 
 
-def test_static_fallback_baseline_used_without_calibration():
-    session = _session(_feedback(399), baseline=None)
-    with pytest.raises(SafetyAbort, match="空夹基线=394"):
+def test_uncalibrated_session_refuses_to_judge_instead_of_using_a_constant():
+    # The real 2026-08-04 case, from cycle_20260804_codex_full_04/px5.log:
+    # the gripper closed to pos=100 at state=3 current=101 -- a genuine hold,
+    # 101 being within 3 of the current the successful 08-03 grasp reported --
+    # and the historical 394 rejected it.  execute_mtc_trajectory.py runs in a
+    # different process from calibrate_mtc_gripper.py, so its session had never
+    # calibrated.  Refusing is the only safe answer here; guessing was what
+    # produced both the false reject and the 3-count fluke that preceded it.
+    session = _session(_feedback(100, current=101), baseline=None)
+    with pytest.raises(SafetyAbort, match="本轮没有空夹基线"):
         session.close_gripper(DemoParams())
+
+
+def test_measured_zero_baseline_accepts_the_grasp_the_constant_rejected():
+    session = _session(_feedback(100, current=101), baseline=0)
+    assert int(session.close_gripper(DemoParams())["pos"][0]) == 100
 
 
 def test_no_internal_force_reached_aborts():

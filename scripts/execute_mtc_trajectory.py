@@ -15,7 +15,13 @@ import threading
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import yaml
+
 from shelf_dispenser.core import DemoParams, SafetyAbort
+from shelf_dispenser.grasp_ledger import (
+    append_executed_grasp,
+    executed_grasp_row,
+)
 from shelf_dispenser.mobile_body import LiftSocketAdapter
 from shelf_dispenser.mtc_execution import (
     execute_pick,
@@ -48,6 +54,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--speed", type=int, default=100)
     parser.add_argument("--gripper-calibration-record", type=Path)
+    parser.add_argument(
+        "--grasp-ledger",
+        type=Path,
+        help="成功执行的追加式记录，默认 outputs/executed_grasps.jsonl",
+    )
     parser.add_argument(
         "--record",
         type=Path,
@@ -185,6 +196,23 @@ def main(argv: list[str] | None = None) -> int:
         ),
         encoding="utf-8",
     )
+    # Keep what actually worked next to what a person demonstrated.  Append
+    # only, and never let a bookkeeping problem undo a completed motion: the
+    # arm has already moved and the execution evidence is already on disk.
+    try:
+        ledger = cli.grasp_ledger or (ROOT / "outputs/executed_grasps.jsonl")
+        append_executed_grasp(
+            ledger,
+            executed_grasp_row(
+                mode=cli.mode,
+                scenario=yaml.safe_load(cli.scenario.read_text(encoding="utf-8")),
+                trajectory=json.loads(cli.trajectory.read_text(encoding="utf-8")),
+                completion=completed,
+            ),
+        )
+        print(f"成功记录已追加: {ledger}")
+    except Exception as exc:  # noqa: BLE001 - never fail a completed run on this
+        print(f"警告: 成功记录写入失败，执行本身未受影响: {exc}")
     print(f"{cli.mode} 分阶段执行完成: {completed}")
     print(f"执行证据已写入: {record}")
     return 0

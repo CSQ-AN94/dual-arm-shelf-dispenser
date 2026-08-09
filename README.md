@@ -13,15 +13,29 @@ shelf and table profiles to share a `home_joints_deg` taught three weeks earlier
 for a different task.
 
 **Status: real hardware, partially working.** The first successful real shelf
-grasp landed 2026-08-03. A full pick → lift → place cycle has not completed. The
-honest per-stage picture is in `docs/`.
+grasp landed 2026-08-03. Pick, the tucked carry and the lift all completed on
+2026-08-07; place has not. The honest per-stage picture is in `docs/`.
+
+Bringing the left arm up to executing a grasp has its own writeup:
+[`docs/left_arm_bringup.md`](docs/left_arm_bringup.md). Everything it needs is
+already in place except one thing — its tool transform was mirrored from the
+right arm rather than measured, which is exactly what `execution_eligible:
+false` is recording.
+
+One problem gates the rest and has its own writeup:
+[`docs/rgbd_voxel_inflation.md`](docs/rgbd_voxel_inflation.md). The RGB-D
+obstacle voxels model the shelf up to 25 mm thicker than it is, so the planner
+refuses paths the arm has physically driven — measured, then disproved by
+replaying an operator's own hand-taught path on hardware. Half of it is fixed
+(the shelf panels were being modelled twice, once analytically and once as fat
+voxels); the remainder is what currently blocks place.
 
 ## Hardware
 
 | | |
 |---|---|
 | Arms | 2 × Realman RM75 (7-DoF), `robotic-arm` pip SDK |
-| Gripper | RMG24, right arm |
+| Gripper | 2 × RMG24, one per arm. Only the right one's tool chain has been measured, which is why `dual_rm75_arms.yaml` still carries `execution_eligible: false` for the left arm — its transform is mirrored from the right, not surveyed |
 | Depth | RealSense D435 (head) + wrist cameras |
 | Lift | serial column, 250–707 mm |
 | Compute | Jetson AGX Orin, ROS 2 Humble |

@@ -357,6 +357,22 @@ def main():
                 for contact in validity.contacts[:8]
             ]
         )
+        goal_state_contact_details = (
+            []
+            if validity is None
+            else [
+                {
+                    "bodies": [contact.contact_body_1, contact.contact_body_2],
+                    "position": [
+                        float(contact.position.x),
+                        float(contact.position.y),
+                        float(contact.position.z),
+                    ],
+                    "depth": float(contact.depth),
+                }
+                for contact in validity.contacts[:8]
+            ]
+        )
         goal_candidate_link7_fk = compute_link7_fk(
             node, fk_client, goal_state, planning_frame, ik_link
         )
@@ -471,6 +487,7 @@ def main():
             "goal_constraint": goal_constraint,
             "goal_state_valid": goal_state_valid,
             "goal_state_contacts": goal_state_contacts,
+            "goal_state_contact_details": goal_state_contact_details,
             "start_link7_fk": start_link7_fk,
             "goal_candidate_link7_fk": goal_candidate_link7_fk,
             "endpoint_link7_fk": endpoint_link7_fk,

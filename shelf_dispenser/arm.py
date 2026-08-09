@@ -82,20 +82,30 @@ def validate_holding_gripper_feedback(
     state: dict,
     params: DemoParams,
     *,
-    empty_close_pos: int | None = None,
+    empty_close_pos: int | None,
 ) -> dict:
-    """Require settled force-hold plus a gap above the measured empty baseline."""
+    """Require settled force-hold plus a gap above the measured empty baseline.
+
+    There is deliberately no static default.  A stale constant standing in for
+    this run's calibration is not a safe fallback, it is a silent wrong answer:
+    on 2026-08-04 the historical 394 rejected a real grasp that had closed to
+    pos=100 with the round's own measured baseline sitting at 0, and the run
+    before it passed at pos=403 against the same 394 by three counts.
+    """
     try:
         dof_state = int(state["dof_state"][0])
         pos = int(state["pos"][0])
         current = int(state["current"][0])
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise SafetyAbort("夹爪闭合反馈缺失或格式无效") from exc
-    baseline = (
-        params.gripper_empty_closed_position
-        if empty_close_pos is None
-        else int(empty_close_pos)
-    )
+    if empty_close_pos is None:
+        raise SafetyAbort(
+            "本轮没有空夹基线，拒绝判定是否抓到水瓶: "
+            f"pos={pos}, current={current}。"
+            "先在自由空间跑 calibrate_empty_close()，"
+            "或把标定证据里的 empty_close_pos 传进来"
+        )
+    baseline = int(empty_close_pos)
     minimum_object_pos = baseline + params.gripper_object_margin
     if dof_state != 3:
         raise SafetyAbort(
@@ -218,6 +228,10 @@ class RobotSession:
         )
         self.take_control = take_control
         self.closed = False
+        # Set by calibrate_empty_close(), or handed over from another process's
+        # calibration record.  Stays None until then so the grasp judgment
+        # refuses rather than borrowing a constant from an earlier day.
+        self.empty_close_pos: int | None = None
         if self.take_control:
             self._stop_teleop()
         self.arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
@@ -1500,19 +1514,15 @@ class RobotSession:
         dof_state = int(state["dof_state"][0])
         pos = int(state["pos"][0])
         current = int(state["current"][0])
-        baseline = getattr(
-            self, "empty_close_pos", params.gripper_empty_closed_position
-        )
-        minimum_object_pos = baseline + params.gripper_object_margin
+        baseline = self.empty_close_pos
         LOG.info(
-            "RM Plus 闭合反馈: state=%d pos=%d current=%d; "
-            "空夹基线=%d(%s) 抓取阈值 pos>%d",
+            "RM Plus 闭合反馈: state=%d pos=%d current=%d; 空夹基线=%s 抓取阈值 %s",
             dof_state,
             pos,
             current,
-            baseline,
-            "本轮实测" if hasattr(self, "empty_close_pos") else "静态回退",
-            minimum_object_pos,
+            "未标定" if baseline is None else f"{baseline}(本轮实测)",
+            "无" if baseline is None
+            else f"pos>{baseline + params.gripper_object_margin}",
         )
         validate_holding_gripper_feedback(
             state,
@@ -1556,6 +1566,8 @@ class RobotSession:
             self.arm.rm_delete_robot_arm()
         finally:
             if self.take_control:
-                LOG.warning(
-                    "SDK 已断开；未自动恢复遥操。检查现场后手动运行官方 upstart_all.sh"
-                )
+                # 本项目全程不跑遥操：atom 以 ~100Hz 发关节保持、zhixing_ctrl.py
+                # 以 ~10Hz 发夹爪位置，两个控制源同时下发会互相覆盖，夹爪控制器
+                # 还可能因此锁死（只有末端断电重启能救）。所以这里只陈述状态，
+                # 不再指引任何人去跑 upstart_all.sh。
+                LOG.info("SDK 已断开；遥操按本项目要求保持关闭")

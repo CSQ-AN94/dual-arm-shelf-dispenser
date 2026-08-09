@@ -36,12 +36,13 @@ TEMPLATE = (
 SAFETY_PROFILES = ROOT / "shelf_dispenser/safety_profiles.json"
 ARMS = ("right_arm", "left_arm")
 BOTTLE_RADIUS_M = 0.033
+BOTTLE_HEIGHT_M = 0.217
 BOTTLE_CENTER_X_BAND_M = (-0.25, 0.25)
 # The padded shelf-bottom collision box ends at y=-0.5878 m.  Keeping each
 # centre at least one radius inward makes the whole bottle footprint supported.
 BOTTLE_CENTER_Y_BAND_M = (-0.66, -0.625)
-# Measured shelf-board top (-0.193 m) plus half the 0.21 m bottle height.
-BOTTLE_CENTER_Z_M = -0.088
+# Measured shelf-board top plus half the bottle height.
+BOTTLE_CENTER_Z_M = -0.193 + BOTTLE_HEIGHT_M / 2.0
 MIN_LATERAL_SEPARATION_M = 0.11
 
 

@@ -170,14 +170,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--target-product",
         default=None,
         help=(
-            "按商品类别选择要抓的目标（YOLO 类别名，可用逗号分隔多个别名）；"
-            "不给则保持现状——detector 内置的通用瓶子类别"
+            "按商品类别选择要抓的目标（P01-P06，大小写均可；"
+            "可用逗号分隔多个类别）；不给则允许当前六类饮料"
         ),
-    )
-    parser.add_argument(
-        "--restore-teleop",
-        action="store_true",
-        help="demo 结束（STOP/Ctrl+C 退出保持）后自动运行官方 upstart_all.sh 恢复遥操",
     )
     parser.add_argument(
         "--resume-at-wrist",

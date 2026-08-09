@@ -4,14 +4,14 @@
   "assets": [
     {
       "role": "primary_detector",
-      "relative_path": "intelligence/yolo_models/8_17.pt",
+      "relative_path": "intelligence/yolo_models/mixed_shelf_yolo26s_all51.pt",
       "required": true,
-      "version": "8_17",
-      "size_bytes": 6266659,
-      "sha256": "b3a7f96753c476881706b804a4d92434dac4c018a47b70c17767ca39d0c53433",
-      "source_uri": "ssh://rm@192.168.3.68/home/rm/Grabber/intelligence/yolo_models/8_17.pt",
-      "source_mtime_utc": "2026-06-25T14:09:52Z",
-      "source_checked_at_utc": "2026-07-24T10:06:47Z"
+      "version": "yolo26s-mixed-shelf-all51@sha256:de20012af01f",
+      "size_bytes": 20307845,
+      "sha256": "de20012af01fda682af1f87854e32670d0ce908ce432960c981f550e63235790",
+      "source_uri": "ssh://kevincsq@10.111.122.223/F:/yolo/models/mixed_shelf_yolo26s_all51.pt",
+      "source_mtime_utc": "2026-08-08T19:03:34Z",
+      "source_checked_at_utc": "2026-08-08T19:57:27Z"
     },
     {
       "role": "fallback_detector",
@@ -22,7 +22,7 @@
       "sha256": null,
       "source_uri": null,
       "availability": "not_authorized_or_versioned",
-      "reason": "Use only after a separately authorized versioned artifact is added to this lock and exact archive."
+      "reason": "No separately authorized fallback model is loaded."
     }
   ]
 }

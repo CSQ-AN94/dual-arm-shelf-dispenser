@@ -118,10 +118,10 @@ def test_run_shelf_survey_fits_a_clean_plane_end_to_end():
     )
     results = run_shelf_survey(demo, ["shelf_bottom"], target)
     fit = results["shelf_bottom"]["fit"]
-    assert fit["plane_m"] == pytest.approx(plane_value + 0.01, abs=1e-6)
+    assert fit["plane_m"] == pytest.approx(plane_value, abs=1e-6)
     box = results["shelf_bottom"]["suggested_box"]
     assert box["id"] == "shelf_bottom"
-    assert box["max"][2] == pytest.approx(plane_value + 0.01, abs=1e-6)
+    assert box["max"][2] == pytest.approx(plane_value, abs=1e-6)
 
 
 def test_run_shelf_survey_rejects_unknown_face_before_touching_camera():

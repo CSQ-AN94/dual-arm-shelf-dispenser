@@ -321,7 +321,8 @@ def test_place_only_has_late_support_contact_and_restores_the_acm():
         "target_contact",
         "open_gripper_semantic",
         "detach_bottle",
-        "target_retreat",
+        "target_lift",
+        "target_exit",
         "restore_support_collision_check",
         "move_to_post_place_home",
     ]
@@ -330,16 +331,35 @@ def test_place_only_has_late_support_contact_and_restores_the_acm():
     before_contact = PLANNER_CODE[
         positions[0]:positions[4]
     ]
-    assert "target_support_surface_id, true" not in before_contact
+    assert "if (!s.has_target_preplace_pose)" in before_contact
     restore = PLANNER_CODE[positions[-2]:positions[-1]]
     assert "target_support_surface_id, false" in restore
     assert "arm.touch_links, false" in restore
     assert "EXTERNAL_GATED_PLACE_EXECUTOR_REQUIRED" in PLANNER_CPP
     assert "place-only segment contains duplicate joint names" in PLANNER_CPP
-    assert "place-only export expected five motion segments" in PLANNER_CPP
+    assert "place-only export expected six motion segments" in PLANNER_CPP
     assert "stage->setGoal(home_goal);" in PLANNER_CODE
+    assert "s.target_place_reference_joints_deg" in PLANNER_CODE
     for phase in ('"transport"', '"approach"', '"release"', '"retreat"'):
         assert phase in PLANNER_CPP
+
+
+def test_demonstrated_place_route_uses_its_exact_gate_without_rrt_fallback():
+    scenario_code = (PKG / "src" / "scenario.cpp").read_text(encoding="utf-8")
+    header = (PKG / "src" / "scenario.hpp").read_text(encoding="utf-8")
+    assert "target_preplace_pose" in header
+    assert "target_preplace_reference_joints_deg" in header
+    assert 'root["target_preplace_pose"]' in scenario_code
+    assert 'root["target_preplace_reference_joints_deg"]' in scenario_code
+    assert "s.has_target_preplace_pose" in PLANNER_CODE
+    assert 'p + "transport_to_demonstrated_preplace"' in PLANNER_CODE
+    demonstrated_transport = PLANNER_CODE.split(
+        'p + "transport_to_demonstrated_preplace"', 1
+    )[1].split("branch->insert", 1)[0]
+    assert "straight" in demonstrated_transport
+    assert "sampling" not in demonstrated_transport
+    assert "s.target_preplace_pose" in PLANNER_CODE
+    assert "s.target_preplace_reference_joints_deg" in PLANNER_CODE
 
 
 def test_empty_shelf_entry_is_head_only_fresh_and_keeps_non_target_voxels():
@@ -364,8 +384,13 @@ def test_empty_shelf_entry_is_head_only_fresh_and_keeps_non_target_voxels():
     assert '"arm_clear_of_view"' in PLACE_CAPTURE
     assert 'payload.get("occlusion_regime", "held_arm_subtracted")' in PLACE_CONVERTER
     assert "held | robot_tool" in PLACE_CONVERTER
-    assert '"target_insert_direction": [0.0, 0.0, -1.0]' in PLACE_CONVERTER
-    assert '"target_retreat_direction": [0.0, 0.0, 1.0]' in PLACE_CONVERTER
+    assert '"target_insert_direction": route["insert_direction"]' in PLACE_CONVERTER
+    assert '"target_contact_direction": route["contact_direction"]' in PLACE_CONVERTER
+    assert '"target_retreat_direction": route["retreat_direction"]' in PLACE_CONVERTER
+    assert '"target_preplace_pose": route["preplace_pose"]' in PLACE_CONVERTER
+    assert 'geometry = product_geometry(cli.product_code)' in PLACE_CONVERTER
+    assert 'held_bottle_height_m=geometry["height_m"]' in PLACE_CAPTURE
+    assert '"product_code": geometry["product_code"]' in PLACE_CAPTURE
     assert (
         '"post_place_home_joints_deg": list(profile.grasp_start_right_joints_deg)'
         in PLACE_CONVERTER
@@ -392,6 +417,7 @@ def test_cross_layer_runner_uses_live_state_then_pick_lift_empty_place():
     assert "operator-confirms-lower-shelf-obstacles-complete" in CROSS_LAYER_RUNNER
     assert '"--allow-sdk-retiming"' in CROSS_LAYER_RUNNER
     assert "--lift-target-mm" in CROSS_LAYER_RUNNER
+    assert '"--product-code"' in CROSS_LAYER_RUNNER
     assert "load_lift_transfer_contract" not in CROSS_LAYER_RUNNER
 
 

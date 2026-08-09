@@ -96,17 +96,25 @@ def test_grasp_pixel_height_is_deterministic_and_above_midline():
     assert expected_v < 0.5 * (10 + 90)  # 高于框中线
 
 
-def test_shelf_profile_uses_a_higher_grasp_band_without_changing_table():
+def test_shelf_profile_uses_a_lower_grasp_band_without_changing_table():
     config = Path(__file__).parents[2] / "shelf_dispenser" / "safety_profiles.json"
     shelf = load_safety_profile(
         config, "shelf_template", require_verified=False
     )
     table = load_safety_profile(config, "table_demo", require_verified=False)
 
-    assert shelf.grasp_height_fraction == pytest.approx(0.40)
+    # 0.69 measured, not chosen: a hand-taught grasp on 2026-08-04 sat 29.8 mm
+    # below the point the pipeline computed at 0.55.  The detection box was
+    # 179 px for a 210 mm bottle, so 29.8 mm is about 25 px, or 0.14 of the box
+    # height.  The fraction runs from the *top* of the box, because image y
+    # grows downward -- which is why a larger number grasps lower.
+    assert shelf.grasp_height_fraction == pytest.approx(0.69)
     assert table.grasp_height_fraction is None
-    # Same 80 px bottle box: shelf samples 4 px higher than the 0.45 default.
-    assert 10 + shelf.grasp_height_fraction * 80 == pytest.approx(42.0)
+    # Same 80 px bottle box: shelf samples 8 px lower than the 0.45 default.
+    # A box from y=10 to y=90: the grasp lands 69% of the way down it, which
+    # for a bottle standing upright is below the mid-line and near the taught
+    # point.  At the old 0.55 this was 54.0.
+    assert 10 + shelf.grasp_height_fraction * 80 == pytest.approx(65.2)
     assert 10 + DemoParams().grasp_height_fraction * 80 == pytest.approx(46.0)
 
 
@@ -575,10 +583,12 @@ def test_shelf_profile_accepts_20260720_center_bottle_target():
     ids = {box.id for box in profile.keepout_boxes}
     assert "shelf_slot_left_guard" not in ids
     assert "shelf_slot_right_guard" not in ids
-    dynamic_faces = {
+    shelf_faces = {
         box.id for box in profile.keepout_boxes if box.id in FACE_SPECS
     }
-    assert dynamic_faces == {"shelf_bottom", "shelf_top", "shelf_back"}
+    assert shelf_faces == {"shelf_bottom", "shelf_top", "shelf_back"}
+    live_faces = {face for face in shelf_faces if FACE_SPECS[face].live_fit}
+    assert live_faces == {"shelf_bottom", "shelf_back"}
 
 
 def test_rgbd_voxel_centres_already_inside_fence_are_not_double_inflated():

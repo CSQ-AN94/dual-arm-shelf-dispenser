@@ -167,7 +167,6 @@ def main() -> int:
             confirm_before_grasp=False,
             place_back=False,
             return_home=False,
-            restore_teleop=False,
             resume_at_wrist=False,
             finish_from_current=False,
             host="127.0.0.1",

@@ -30,7 +30,13 @@ def test_ndarray_survives_the_round_trip():
 def test_the_whitelist_is_enforced_on_both_sides():
     """A typo must not reach a method nobody vetted for the second arm."""
     assert "move_linear" not in ALLOWED_METHODS
-    assert "open_gripper" not in ALLOWED_METHODS
+    # The full gripper cycle is admitted: closing once is how a left-arm grasp
+    # gets its evidence, and what an unvalidated tool transform gets wrong is
+    # where the TCP goes -- the fence and the planner's question, not the
+    # fingers'.  Free-space motion beyond the vetted path still is not.
+    assert "open_gripper" in ALLOWED_METHODS
+    assert "close_gripper" in ALLOWED_METHODS
+    assert "calibrate_empty_close" in ALLOWED_METHODS
     assert "joints_deg" in ALLOWED_METHODS
 
     proxy = ArmProxy.__new__(ArmProxy)

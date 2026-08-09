@@ -54,13 +54,45 @@ def _detector(model, fallback_model=None):
     detector.model = model
     detector.confidence = 0.25
     detector.lock = threading.Lock()
-    detector.aliases = {"bottle", "water", "mineral_water", "矿泉水", "水瓶"}
+    detector.aliases = {
+        "bottle",
+        "water",
+        "mineral_water",
+        "矿泉水",
+        "水瓶",
+        "p01",
+        "p02",
+        "p03",
+        "p04",
+        "p05",
+        "p06",
+    }
     detector.fallback_model = fallback_model
     detector.fallback_confidence = 0.05
     return detector
 
 
 NAMES = {0: "bottle", 1: "coke_can", 2: "sprite_bottle"}
+
+
+def test_custom_product_classes_are_accepted_without_explicit_filter():
+    detector = _detector(FakeModel({0: "p01"}, [FakeBox(0, 0.9, (0, 0, 10, 10))]))
+
+    detection = detector.detect(np.zeros((4, 4, 3), dtype=np.uint8))
+
+    assert detection is not None
+    assert detection.class_name == "p01"
+
+
+def test_target_product_code_matching_is_case_insensitive():
+    detector = _detector(FakeModel({0: "p01"}, [FakeBox(0, 0.9, (0, 0, 10, 10))]))
+
+    detection = detector.detect(
+        np.zeros((4, 4, 3), dtype=np.uint8), target_classes={"P01"}
+    )
+
+    assert detection is not None
+    assert detection.class_name == "p01"
 
 
 def test_without_target_classes_keeps_generic_bottle_alias_behaviour():

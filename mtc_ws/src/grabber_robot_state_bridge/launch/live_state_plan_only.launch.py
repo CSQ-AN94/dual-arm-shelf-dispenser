@@ -35,6 +35,10 @@ from launch_ros.actions import Node
 import xacro
 import yaml
 
+from grabber_robot_state_bridge.robot_description import (
+    install_ctag2f90d_geometry,
+)
+
 MOVEIT_CONFIG_PACKAGE = "dual_rm_75b_moveit_config"
 
 # Keep in sync with shelf_dispenser/ros/ompl_config.py: the default 0.01 leaves a
@@ -60,6 +64,7 @@ def generate_launch_description():
     robot_xml = xacro.process_file(
         os.path.join(package_path, "config", "dual_rm_75b_description.urdf.xacro")
     ).toxml()
+    robot_xml = install_ctag2f90d_geometry(robot_xml)
     semantic = _load_text(MOVEIT_CONFIG_PACKAGE, "config/dual_rm_75b_description.srdf")
     kinematics = _load_yaml(MOVEIT_CONFIG_PACKAGE, "config/kinematics.yaml")
     joint_limits = _load_yaml(MOVEIT_CONFIG_PACKAGE, "config/joint_limits.yaml")

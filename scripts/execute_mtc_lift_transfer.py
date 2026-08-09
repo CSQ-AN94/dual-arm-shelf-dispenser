@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from shelf_dispenser.core import DemoParams, SafetyAbort
-from shelf_dispenser.mobile_body import LiftSocketAdapter, WooshChassisAdapter
+from shelf_dispenser.mobile_body import LiftSocketAdapter
 from shelf_dispenser.mtc_execution import execute_lift_transfer
 from shelf_dispenser.arm import ArmJointReader, RobotSession
 from shelf_dispenser.safety import load_safety_profile
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if not cli.execute:
         print("pick 执行证据格式有效。")
-        print("未指定 --execute：未连接机械臂、底盘或升降机构。")
+        print("未指定 --execute：未连接机械臂或升降机构。")
         return 0
 
     cfg = load_config(cli.config)
@@ -90,7 +90,6 @@ def main(argv: list[str] | None = None) -> int:
             lift=LiftSocketAdapter(
                 cfg.connections.left_arm_ip, cfg.connections.arm_port
             ),
-            chassis=WooshChassisAdapter(stop_event=stop_event),
             speed=cli.speed,
         )
     finally:

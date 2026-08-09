@@ -1,11 +1,11 @@
 """Per-run shelf-panel fitting so the electronic fence tracks the real shelf.
 
 Generalizes ``table_model.py``'s "single horizontal plane below the target"
-fit to any of the five shelf-compartment faces (bottom/top/back/left/right
-panel). Each face is a plane normal to one axis, searched on the keepout
-side of the target and adapted with the same fail-closed, only-grow-in-plane
-rules that ``table_model.py`` already validated on real hardware for the
-``table_top`` case.
+fit to the shelf-compartment faces visible from the fixed head camera. Each
+face is a plane normal to one axis, searched on the keepout side of the target
+and adapted with the same fail-closed, only-grow-in-plane rules that
+``table_model.py`` already validated on real hardware for the ``table_top``
+case. Faces hidden from this camera stay at their measured static fence.
 
 ``table_model.py`` itself is intentionally left untouched: ``table_demo``
 keeps running on its existing, real-machine-verified code path. This module
@@ -65,6 +65,7 @@ class FaceSpec:
     free_space_sign: float
     min_gap_m: float | None = None
     max_gap_m: float | None = None
+    live_fit: bool = True
 
     @property
     def tracked_bound(self) -> str:
@@ -77,7 +78,11 @@ class FaceSpec:
 # has these surfaces, so there is nothing to gain from a more open design.
 FACE_SPECS: dict[str, FaceSpec] = {
     "shelf_bottom": FaceSpec(axis=2, free_space_sign=1.0),
-    "shelf_top": FaceSpec(axis=2, free_space_sign=-1.0, min_gap_m=0.20),
+    # 固定头部画面看不到上层板的下表面；此前的一维 z 众数会把背板横带误认
+    # 成顶板。顶面继续使用现场测得的保守静态围栏，不做伪动态拟合。
+    "shelf_top": FaceSpec(
+        axis=2, free_space_sign=-1.0, min_gap_m=0.20, live_fit=False
+    ),
     "shelf_back": FaceSpec(axis=1, free_space_sign=-1.0),
     "shelf_left_panel": FaceSpec(axis=0, free_space_sign=1.0),
     "shelf_right_panel": FaceSpec(axis=0, free_space_sign=-1.0),
@@ -118,6 +123,8 @@ def fit_shelf_face(
     if face not in FACE_SPECS:
         raise SafetyAbort(f"未知的货架面标识: {face}")
     spec = FACE_SPECS[face]
+    if not spec.live_fit:
+        return None
     effective_min_gap = (
         min_gap_m
         if min_gap_m is not None
@@ -169,15 +176,25 @@ def fit_shelf_face(
     inliers = candidates[selected]
     if len(inliers) < params.shelf_fit_min_inliers:
         return None
+    centered = inliers - np.mean(inliers, axis=0)
+    _, eigenvectors = np.linalg.eigh(centered.T @ centered)
+    normal = eigenvectors[:, 0]
+    if abs(float(normal[axis])) < params.shelf_fit_min_normal_alignment:
+        return None
+    margin_m = (
+        params.shelf_bottom_fit_conservative_margin_m
+        if face == "shelf_bottom"
+        else params.shelf_fit_conservative_margin_m
+    )
     if spec.free_space_sign > 0:
         plane_m = (
             float(np.percentile(inliers[:, axis], 90))
-            + params.shelf_fit_conservative_margin_m
+            + margin_m
         )
     else:
         plane_m = (
             float(np.percentile(inliers[:, axis], 10))
-            - params.shelf_fit_conservative_margin_m
+            - margin_m
         )
     in_plane_ranges: dict[int, tuple[float, float]] = {}
     for in_axis in in_plane_axes:
@@ -236,6 +253,45 @@ def combine_shelf_fits(
     )
 
 
+def fitted_panel_mask(
+    points: np.ndarray,
+    fits_by_face: dict[str, FaceFit | None],
+) -> np.ndarray:
+    """True where a point is already accounted for by a measured panel plane.
+
+    The RGB-D voxel field exists to catch what the profile does not know about
+    -- a neighbouring bottle, a box somebody left in the bin.  The shelf's own
+    back and bottom are not that: they are fitted every round and enforced as
+    analytic keepout boxes, so voxelizing them again models the same surface a
+    second time, and worse.  A voxel is a 25 mm cube snapped to a fixed grid,
+    so the duplicate can stand up to a full 25 mm proud of the surface it came
+    from, and 2026-08-06 measured exactly that: the hand penetrated the voxel
+    field by 24.5 mm on a path the operator had already driven by hand without
+    touching anything, and by 25.03 mm on that hand-driven path itself.  Of
+    ~1000 voxels in a pick scene, ~990 were those two panels.
+
+    So this deletes points the fence already covers, and nothing else.  What
+    stands proud of a panel -- which is every real obstacle, a bottle included
+    -- keeps its points and its voxels.  Deletion is bounded twice over: only
+    on the panel side of a bound that already carries its own conservative
+    margin, and only within the in-plane extent the fit actually observed.
+    """
+    points = np.asarray(points, dtype=float)
+    mask = np.zeros(len(points), dtype=bool)
+    if points.size == 0:
+        return mask
+    for face, fit in (fits_by_face or {}).items():
+        spec = FACE_SPECS.get(face)
+        if spec is None or fit is None:
+            continue
+        behind = (points[:, spec.axis] - fit.plane_m) * spec.free_space_sign < 0.0
+        within = np.ones(len(points), dtype=bool)
+        for in_axis, (low, high) in fit.in_plane_ranges.items():
+            within &= (points[:, in_axis] >= low) & (points[:, in_axis] <= high)
+        mask |= behind & within
+    return mask
+
+
 def adapt_profile_to_shelf(
     profile: SafetyProfile,
     fits_by_face: dict[str, FaceFit | None],
@@ -244,14 +300,18 @@ def adapt_profile_to_shelf(
     """Return a profile whose shelf-panel keepout boxes follow this run's
     measured panels.
 
-    Every keepout box whose id is a recognized shelf face (``FACE_SPECS``) is
-    updated from ``fits_by_face[box.id]``; a missing measurement for a face
-    the profile actually has is fatal, mirroring
+    Every live-fit keepout box is updated from ``fits_by_face[box.id]``; a
+    missing measurement for a visible face the profile actually has is fatal,
+    mirroring
     ``adapt_profile_to_table``'s "expects a table but found none" rule.
     Boxes with unrecognized ids (including ``table_top``) pass through
     untouched.
     """
-    recognized = [box for box in profile.keepout_boxes if box.id in FACE_SPECS]
+    recognized = [
+        box
+        for box in profile.keepout_boxes
+        if box.id in FACE_SPECS and FACE_SPECS[box.id].live_fit
+    ]
     if not recognized:
         return profile
     updated_by_id: dict[str, FenceBox] = {}

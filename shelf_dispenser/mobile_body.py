@@ -200,12 +200,18 @@ class LiftSocketAdapter:
         # Never infer success from it: the fresh state below is authoritative.
         if response.get("error_code") not in (None, 0):
             raise SafetyAbort(f"升降命令被控制器拒绝: {response}")
-        after = self.state()
-        if abs(after.height_mm - height_mm) > 5:
-            raise SafetyAbort(
-                f"升降未到位: target={height_mm} mm, actual={after.height_mm} mm"
-            )
-        return after
+        deadline = time.monotonic() + self.timeout_s
+        while True:
+            after = self.state()
+            if abs(after.height_mm - height_mm) <= 5 and after.mode == 0:
+                return after
+            if time.monotonic() >= deadline:
+                raise SafetyAbort(
+                    "升降未在时限内到位并停止: "
+                    f"target={height_mm} mm, actual={after.height_mm} mm, "
+                    f"mode={after.mode}"
+                )
+            time.sleep(0.1)
 
 
 class WooshChassisAdapter:

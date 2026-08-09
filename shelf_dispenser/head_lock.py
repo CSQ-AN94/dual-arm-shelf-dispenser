@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import select
+import signal
 import socket
 import subprocess
 import termios
@@ -32,15 +33,12 @@ from typing import Optional
 
 LOG = logging.getLogger("bottle_demo")
 
-BROADCAST_IP = "169.254.128.255"
-CONTROL_PORT = 19999
 ANGLE_PORT = 9996
-
-HEAD_CTRL_IO = 5
-UP_IO, DOWN_IO, LEFT_IO, RIGHT_IO = 6, 7, 8, 9
 
 # 2026-07-08 标定会话实测基准值：俯仰(angle1)最低、偏航(angle2)居中。
 HEAD_REFERENCE = {"angle1": 398, "angle2": 516}
+# 厂商服务限制 angle1 的命令下限为 400；其反馈在该机械限位附近为 398±数个单位。
+HEAD_COMMAND_REFERENCE = {1: 400, 2: 516}
 TOLERANCE = 5  # 舵机反馈本身有几个单位的抖动
 
 # head_servo_ctrl.py 里角度查询线程和运动指令共用同一把串口锁：执行运动
@@ -58,22 +56,8 @@ HEAD_SERVO_PYTHON = "/home/rm/miniconda3/bin/python3"
 HEAD_SERVO_RESTART_LOG = "/tmp/head_servo_ctrl.autorestart.log"
 RESTART_BROADCAST_WAIT = 25.0
 
-# 闭环里连续发了运动指令但角度完全不变，说明控制链路（串口写入侧）卡死，
-# 广播还活着也没用——这种也用重启来救。
-STAGNANT_STEPS_BEFORE_RESTART = 3
-
 DIRECT_SERIAL_PATHS = ("/dev/rmUSB3", "/dev/ttyUSB0")
 DIRECT_ANGLE_QUERY = bytes([0x55, 0x55, 0x05, 0x15, 0x02, 0x01, 0x02])
-
-
-def _make_io_frame(*pressed_ios: int) -> bytes:
-    frame = bytearray(34)
-    frame[0] = 0x01
-    frame[1] = 0x04
-    frame[2] = 0x20
-    for io_num in pressed_ios:
-        frame[2 + io_num * 2] = 1
-    return bytes(frame)
 
 
 def _open_angle_socket() -> socket.socket:
@@ -152,19 +136,6 @@ def restart_head_servo() -> Optional[str]:
     return None
 
 
-def _send_action(action: str, repeat: int = 4, interval: float = 0.05) -> None:
-    actions = {"u": UP_IO, "d": DOWN_IO, "l": LEFT_IO, "r": RIGHT_IO}
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    press = _make_io_frame(HEAD_CTRL_IO, actions[action])
-    release = _make_io_frame()
-    for _ in range(repeat):
-        sock.sendto(press, (BROADCAST_IP, CONTROL_PORT))
-        time.sleep(interval)
-    sock.sendto(release, (BROADCAST_IP, CONTROL_PORT))
-    sock.close()
-
-
 def read_current_angle(patience: float = 3.0) -> Optional[dict]:
     sock = _open_angle_socket()
     try:
@@ -214,6 +185,83 @@ def _serial_owner_pids(path: str) -> Optional[set[int]]:
     ):
         return set()
     return None
+
+
+def _absolute_position_frame(servo_id: int, target: int) -> bytes:
+    return bytes(
+        [
+            0x55,
+            0x55,
+            0x08,
+            0x03,
+            0x01,
+            0xE8,
+            0x00,
+            servo_id,
+            target & 0xFF,
+            (target >> 8) & 0xFF,
+        ]
+    )
+
+
+def _write_absolute_reference(owner: int, owner_fd: Path) -> Optional[str]:
+    port = None
+    paused = False
+    failure = None
+    try:
+        os.kill(owner, signal.SIGSTOP)
+        paused = True
+        port = os.open(str(owner_fd), os.O_WRONLY | os.O_NOCTTY)
+        for servo_id, target in HEAD_COMMAND_REFERENCE.items():
+            frame = _absolute_position_frame(servo_id, target)
+            if os.write(port, frame) != len(frame):
+                failure = f"头部舵机 {servo_id} 绝对位置指令没有完整写入"
+                break
+            time.sleep(0.5)
+    except OSError as exc:
+        failure = f"头部绝对位置写入失败: {exc}"
+    finally:
+        if port is not None:
+            try:
+                os.close(port)
+            except OSError:
+                pass
+        if paused:
+            try:
+                os.kill(owner, signal.SIGCONT)
+            except OSError as exc:
+                failure = f"无法恢复头部服务进程 {owner}: {exc}"
+    return failure
+
+
+def _set_absolute_reference() -> Optional[str]:
+    """通过厂商服务持有的串口写入绝对目标；成功返回 None。"""
+    paths = [path for path in DIRECT_SERIAL_PATHS if Path(path).exists()]
+    if not paths:
+        return "没找到头部串口"
+
+    owners = _serial_owner_pids(paths[0])
+    if owners is None or len(owners) != 1:
+        return f"无法唯一确定头部串口服务进程: {owners}"
+    owner = next(iter(owners))
+    proc = Path(f"/proc/{owner}")
+    try:
+        cmdline = (proc / "cmdline").read_bytes()
+    except OSError as exc:
+        return f"无法读取头部服务进程 {owner}: {exc}"
+    if HEAD_SERVO_SCRIPT.encode() not in cmdline:
+        return f"串口进程 {owner} 不是 {HEAD_SERVO_SCRIPT}，拒绝暂停"
+
+    resolved_serial = Path(paths[0]).resolve()
+    try:
+        owner_fd = next(
+            fd
+            for fd in (proc / "fd").iterdir()
+            if fd.resolve() == resolved_serial
+        )
+    except (OSError, StopIteration) as exc:
+        return f"找不到头部服务的串口文件描述符: {exc}"
+    return _write_absolute_reference(owner, owner_fd)
 
 
 def read_current_angle_direct(timeout: float = 2.0) -> Optional[dict]:
@@ -280,11 +328,11 @@ def is_at_reference(current: Optional[dict]) -> bool:
     return abs(d1) <= TOLERANCE and abs(d2) <= TOLERANCE
 
 
-def restore_reference(max_steps: int = 20, allow_restart: bool = True) -> dict:
-    """闭环把头部舵机调回 HEAD_REFERENCE，每个轴独立收敛。
+def restore_reference(max_steps: int = 3, allow_restart: bool = True) -> dict:
+    """用绝对位置命令把头部舵机调回 HEAD_REFERENCE 并闭环复核。
 
-    自愈：角度广播中断超过 BROADCAST_GAP_PATIENCE、或连续发运动指令但角度
-    完全不动（控制链路卡死）时，自动重启 head_servo_ctrl.py 一次再继续。
+    厂商方向键固定以 50 为步长，不能到达标定所需的 angle2=516，因此不能
+    用方向键往返逼近。角度广播中断时仍允许自动重启厂商服务一次。
     返回 {"ok": bool, "angle": 最后读到的角度或 None, "reason"/"steps": ...}，
     不抛异常——是否因此中止整个流程由调用方（demo.py）决定。
     """
@@ -307,72 +355,39 @@ def restore_reference(max_steps: int = 20, allow_restart: bool = True) -> dict:
         return fresh
 
     try:
-        current = None
-        previous = None
-        stagnant = 0
+        current = _wait_fresh_angle(sock, BROADCAST_GAP_PATIENCE)
+        if current is None:
+            current = _recover(
+                f"连续 {BROADCAST_GAP_PATIENCE:.0f}s 没收到角度广播"
+            )
+        if current is None:
+            return {
+                "ok": False,
+                "angle": None,
+                "reason": (
+                    "角度广播中断，自动重启 head_servo_ctrl.py 也没恢复；"
+                    f"看 {HEAD_SERVO_RESTART_LOG}"
+                    if restarted
+                    else "角度广播中断（且本次调用不允许自动重启）"
+                ),
+            }
+        if is_at_reference(current):
+            return {"ok": True, "angle": current, "steps": 0}
+
+        failure = _set_absolute_reference()
+        if failure is not None:
+            return {"ok": False, "angle": current, "reason": failure}
+
         for step in range(1, max_steps + 1):
             current = _wait_fresh_angle(sock, BROADCAST_GAP_PATIENCE)
-            if current is None:
-                current = _recover(
-                    f"连续 {BROADCAST_GAP_PATIENCE:.0f}s 没收到角度广播"
-                )
             if current is None:
                 return {
                     "ok": False,
                     "angle": None,
-                    "reason": (
-                        "角度广播中断，自动重启 head_servo_ctrl.py 也没恢复；"
-                        f"看 {HEAD_SERVO_RESTART_LOG}，或手动: "
-                        f"cd {HEAD_SERVO_SCRIPT_DIR} && "
-                        f"{HEAD_SERVO_PYTHON} {HEAD_SERVO_SCRIPT}"
-                        if restarted
-                        else f"连续 {BROADCAST_GAP_PATIENCE:.0f}s 没收到角度广播"
-                        "（且本次调用不允许自动重启）"
-                    ),
+                    "reason": "绝对位置写入后角度广播中断",
                 }
             if is_at_reference(current):
-                return {"ok": True, "angle": current, "steps": step - 1}
-
-            if previous is not None and (
-                abs(current["angle1"] - previous["angle1"]) <= 1
-                and abs(current["angle2"] - previous["angle2"]) <= 1
-            ):
-                stagnant += 1
-            else:
-                stagnant = 0
-            previous = current
-            if stagnant >= STAGNANT_STEPS_BEFORE_RESTART:
-                recovered = _recover(
-                    f"连续 {stagnant} 步发了运动指令但角度不动，控制链路疑似卡死"
-                )
-                if recovered is not None:
-                    current = previous = recovered
-                    stagnant = 0
-                    if is_at_reference(current):
-                        return {"ok": True, "angle": current, "steps": step}
-
-            d1 = current["angle1"] - HEAD_REFERENCE["angle1"]
-            d2 = current["angle2"] - HEAD_REFERENCE["angle2"]
-            actions = []
-            if d1 < -TOLERANCE:
-                actions.append("u")
-            elif d1 > TOLERANCE:
-                actions.append("d")
-            if d2 < -TOLERANCE:
-                actions.append("l")
-            elif d2 > TOLERANCE:
-                actions.append("r")
-            LOG.info(
-                "头部回中 step %d: current=%s delta=(%+d,%+d) actions=%s",
-                step,
-                current,
-                d1,
-                d2,
-                actions,
-            )
-            for action in actions:
-                _send_action(action)
-                time.sleep(0.4)
+                return {"ok": True, "angle": current, "steps": step}
         return {
             "ok": False,
             "angle": current,

@@ -227,6 +227,44 @@ def validate_execution_bundle(
         item.get("id") for item in candidates if isinstance(item, dict)
     }:
         raise SafetyAbort("MTC 场景不包含所选抓取候选")
+    selected_candidate = next(
+        item for item in candidates if item.get("id") == candidate_id
+    )
+    try:
+        grasp_xyz = np.asarray(
+            selected_candidate["pose"]["xyz"], dtype=float
+        )
+        bottle_center = np.asarray(
+            scenario["bottle"]["pose"]["xyz"], dtype=float
+        )
+        approach = np.asarray(
+            scenario["source_approach_direction"], dtype=float
+        )
+        radius = float(scenario["bottle"]["radius_m"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SafetyAbort("MTC pick 实时抓取几何无效") from exc
+    if (
+        grasp_xyz.shape != (3,)
+        or bottle_center.shape != (3,)
+        or approach.shape != (3,)
+        or not np.all(np.isfinite(grasp_xyz))
+        or not np.all(np.isfinite(bottle_center))
+        or not np.all(np.isfinite(approach))
+        or not math.isfinite(radius)
+        or radius <= 0.0
+        or float(np.linalg.norm(approach)) < 1e-9
+    ):
+        raise SafetyAbort("MTC pick 实时抓取几何无效")
+    approach /= float(np.linalg.norm(approach))
+    expected_grasp = bottle_center - approach * (
+        radius + params.grasp_stop_short_m
+    )
+    geometry_error = float(np.linalg.norm(grasp_xyz - expected_grasp))
+    if geometry_error > params.localized_grasp_geometry_tolerance_m:
+        raise SafetyAbort(
+            "MTC pick 抓取点偏离实时瓶身，疑似复制了示教绝对坐标: "
+            f"error={geometry_error * 1000.0:.1f} mm"
+        )
     workspace = scenario.get("tcp_path_workspace")
     if not isinstance(workspace, dict) or not workspace.get("id"):
         raise SafetyAbort("MTC pick 场景缺少 TCP 路径工作区约束")

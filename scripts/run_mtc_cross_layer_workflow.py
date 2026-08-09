@@ -40,6 +40,11 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
     )
     parser.add_argument("--lift-target-mm", type=int, default=250)
+    parser.add_argument(
+        "--product-code",
+        required=True,
+        choices=("P01", "P02", "P03", "P04", "P05", "P06"),
+    )
     parser.add_argument("--arm-speed", type=int, default=100)
     parser.add_argument("--lift-speed", type=int, default=30)
     parser.add_argument(
@@ -193,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
             "scripts/capture_empty_shelf_places.py",
             "--expected-lift-mm",
             "250",
+            "--product-code",
+            cli.product_code,
             "--roi-min",
             *map(str, cli.lower_roi_min),
             "--roi-max",
@@ -211,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
             "scripts/empty_shelf_places_to_mtc_scenario.py",
             str(empty_observation),
             str(place_scenario),
+            "--product-code",
+            cli.product_code,
         ],
         timeout=20,
     )

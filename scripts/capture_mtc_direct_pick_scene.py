@@ -22,7 +22,7 @@ from shelf_dispenser.orchestrator import RunOrchestrator
 from shelf_dispenser import head_lock
 from shelf_dispenser.core import SafetyAbort
 from shelf_dispenser.run_manifest import write_run_manifest
-from run_pick_place_task import build_args
+from run_pick_place_task import build_parser as build_task_parser
 from localization_to_mtc_scenario import build_scenario
 from utils.config import load_config
 
@@ -55,9 +55,8 @@ def main() -> int:
         "--target-product",
         default=None,
         help=(
-            "按商品类别选择要抓的目标（YOLO 类别名，可用逗号分隔多个别名）；"
-            "不给则保持 detector 内置的通用瓶子类别。注意仓库现有模型只认通用"
-            "瓶子，按 SKU 选格位需要先补类别标注的训练数据"
+            "按商品类别选择要抓的目标（P01-P06，大小写均可；"
+            "可用逗号分隔多个类别）；不给则允许当前六类饮料"
         ),
     )
     cli = parser.parse_args()
@@ -65,7 +64,20 @@ def main() -> int:
 
     Path(cli.output_dir).mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO)
-    demo_args = build_args(cli)
+    demo_args = build_task_parser().parse_args(
+        [
+            "--config",
+            cli.config,
+            "--safety-config",
+            cli.safety_config,
+            "--safety-profile",
+            cli.safety_profile,
+            "--port",
+            str(cli.port),
+            "--output-dir",
+            cli.output_dir,
+        ]
+    )
     # RunOrchestrator reads this at construction, so it has to land before the ctor.
     demo_args.target_product = cli.target_product
     # RunOrchestrator's plan_only initialization connects both arms for planning.

@@ -28,8 +28,10 @@ def test_pilz_lin_is_local_while_connect_keeps_ompl_sampling():
     assert "sampling->setPlannerId(scenario.planner_id);" in PLANNER_CPP
     assert 'node, "pilz_industrial_motion_planner");' in PLANNER_CPP
     assert 'pilz_lin->setPlannerId("LIN");' in PLANNER_CPP
-    assert "GroupPlannerVector{ { arm.planning_group, sampling } }" in PLANNER_CPP
-    assert PLANNER_CPP.count("sampling, local_motion") == 3
+    assert 'std::make_pair(std::string("sampled"), sampling)' in PLANNER_CPP
+    assert "GroupPlannerVector{ { group, option.second } }" in PLANNER_CPP
+    assert PLANNER_CPP.count("buildArmBranch(") == 4  # definition + three callers
+    assert "straight, sampling, local_motion" in PLANNER_CPP
 
 
 def test_launch_supplies_pilz_pipeline_and_cartesian_limits():

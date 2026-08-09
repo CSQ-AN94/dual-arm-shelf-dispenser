@@ -168,6 +168,62 @@ def test_local_scene_also_removes_target_silhouette_voxel_recorded_at_capture():
     np.testing.assert_allclose(remaining, [real_neighbour])
 
 
+def test_head_scene_uses_the_filtered_target_and_non_target_partition(
+    monkeypatch, tmp_path
+):
+    """A rejected floating fragment must not survive in the full scene."""
+    demo = RunOrchestrator.__new__(RunOrchestrator)
+    demo.params = DemoParams(scene_samples=1, scene_voxel_m=0.065)
+    demo.safety = type(
+        "Safety", (), {"use_dynamic_rgbd": True, "frame": "base", "name": "test"}
+    )()
+    demo.camera = type(
+        "Camera",
+        (),
+        {"get_camera_intrinsics": lambda self: (np.eye(3), None)},
+    )()
+    calibration = type(
+        "Calibration", (), {"T_base_right_to_camera_head": np.eye(4)}
+    )()
+    demo.cfg = type("Config", (), {"calibration": calibration})()
+    demo.scene_boxes = []
+    demo.run_dir = tmp_path
+    demo.stage = lambda *_args: None
+    demo._collect_fresh_depth_frames = lambda *_args, **_kwargs: [np.ones((2, 2))]
+    demo._adapt_fence_to_measured_table = lambda *_args: None
+    demo._adapt_fence_to_measured_shelf = lambda *_args: {}
+
+    target = [0.0, 0.0, 0.0]
+    obstacle = [0.065, 0.0, 0.0]
+    floating_fragment = [0.13, 0.0, 0.0]
+    monkeypatch.setattr(
+        demo_module,
+        "build_scene_voxels",
+        lambda *_args, **_kwargs: [target, obstacle, floating_fragment],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        demo_module,
+        "build_target_occupancy_voxels",
+        lambda *_args, **_kwargs: [target],
+    )
+    monkeypatch.setattr(
+        demo_module,
+        "build_non_target_scene_voxels",
+        lambda *_args, **_kwargs: [obstacle],
+    )
+
+    demo._build_head_scene(_localization())
+
+    scene = {tuple(point) for point in demo.head_scene_voxels}
+    classified = {
+        tuple(point)
+        for point in demo.target_occupancy_voxels + demo.non_target_scene_voxels
+    }
+    assert scene == classified
+    assert tuple(floating_fragment) not in scene
+
+
 def test_adapt_fence_skips_multi_frame_fitting_when_profile_has_no_table():
     """A profile without a table keepout has nothing for the measurement to
     adjust. It must not call fit_table_top at all — frame disagreement on a

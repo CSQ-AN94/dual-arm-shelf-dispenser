@@ -69,11 +69,15 @@ struct Scenario
 	geometry_msgs::msg::Pose source_grasp_pose;   // desired TCP pose at the grasp
 	std::vector<GraspCandidate> source_grasp_candidates;
 	geometry_msgs::msg::Pose target_place_pose;   // desired TCP pose at the place
+	/// Exact slot-mouth pose retargeted from that slot's successful teaching.
+	geometry_msgs::msg::Pose target_preplace_pose;
+	bool has_target_preplace_pose{ false };
 
 	geometry_msgs::msg::Vector3 source_approach_direction;
 	geometry_msgs::msg::Vector3 source_lift_direction;
 	geometry_msgs::msg::Vector3 source_retreat_direction;
 	geometry_msgs::msg::Vector3 target_insert_direction;
+	geometry_msgs::msg::Vector3 target_contact_direction;
 	geometry_msgs::msg::Vector3 target_retreat_direction;
 
 	double source_pregrasp_offset_m{ 0.085 };
@@ -83,6 +87,9 @@ struct Scenario
 	double source_retreat_distance_m{ 0.150 };
 	double target_preplace_offset_m{ 0.085 };
 	double target_contact_distance_m{ 0.010 };
+	/// Vertical lift before the place transport, so the held bottle's base
+	/// clears the support keepout.  Computed per capture; 0 disables it.
+	double target_transit_raise_m{ 0.0 };
 	double target_retreat_distance_m{ 0.150 };
 	/// Cartesian segments are accepted when at least this fraction of the
 	/// requested distance is reachable.
@@ -104,6 +111,10 @@ struct Scenario
 	/// the one known to clear the shelf in practice rather than only on paper.
 	/// Empty leaves selection unbiased.
 	std::vector<double> source_grasp_reference_joints_deg;
+	/// Optional demonstrated posture for the lower-row place IK branch.
+	std::vector<double> target_place_reference_joints_deg;
+	/// Demonstrated posture at the slot mouth, before the Cartesian insert.
+	std::vector<double> target_preplace_reference_joints_deg;
 	/// Optional collision-planned right-arm carry pose reached after pick-only
 	/// retreat while the bottle remains attached.
 	std::vector<double> post_pick_carry_joints_deg;
@@ -113,7 +124,7 @@ struct Scenario
 	// Bottle modelled as an upright cylinder at the grasp pose's position.
 	std::string bottle_id{ "bottle" };
 	double bottle_radius_m{ 0.033 };
-	double bottle_height_m{ 0.21 };
+	double bottle_height_m{ 0.217 };
 	geometry_msgs::msg::Pose bottle_pose;
 
 	/// Extra shelf boxes injected on top of the live PlanningScene.  Leave empty

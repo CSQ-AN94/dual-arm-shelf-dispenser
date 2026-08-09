@@ -1,0 +1,624 @@
+{
+  "method": "5-fold out-of-fold predictions, confidence>=0.25, IoU>=0.5",
+  "slot_centers": [
+    0.1,
+    0.37,
+    0.64,
+    0.91
+  ],
+  "slot_summary": [
+    {
+      "slot": 1,
+      "center_x": 0.1,
+      "targets": 37,
+      "correct": 33,
+      "wrong": 4,
+      "missed": 0,
+      "class_accuracy": 0.8919,
+      "detection_recall": 1.0,
+      "correct_confidence_median": 0.9466,
+      "correct_below_0_6": 3,
+      "false_positives": 4
+    },
+    {
+      "slot": 2,
+      "center_x": 0.37,
+      "targets": 37,
+      "correct": 32,
+      "wrong": 4,
+      "missed": 1,
+      "class_accuracy": 0.8649,
+      "detection_recall": 0.973,
+      "correct_confidence_median": 0.841,
+      "correct_below_0_6": 5,
+      "false_positives": 6
+    },
+    {
+      "slot": 3,
+      "center_x": 0.64,
+      "targets": 39,
+      "correct": 28,
+      "wrong": 9,
+      "missed": 2,
+      "class_accuracy": 0.7179,
+      "detection_recall": 0.9487,
+      "correct_confidence_median": 0.7939,
+      "correct_below_0_6": 8,
+      "false_positives": 9
+    },
+    {
+      "slot": 4,
+      "center_x": 0.91,
+      "targets": 39,
+      "correct": 34,
+      "wrong": 4,
+      "missed": 1,
+      "class_accuracy": 0.8718,
+      "detection_recall": 0.9744,
+      "correct_confidence_median": 0.9237,
+      "correct_below_0_6": 4,
+      "false_positives": 7
+    }
+  ],
+  "class_slot_summary": [
+    {
+      "class": "P01",
+      "slot": 1,
+      "targets": 6,
+      "correct": 6,
+      "wrong": 0,
+      "missed": 0,
+      "class_accuracy": 1.0
+    },
+    {
+      "class": "P01",
+      "slot": 2,
+      "targets": 7,
+      "correct": 7,
+      "wrong": 0,
+      "missed": 0,
+      "class_accuracy": 1.0
+    },
+    {
+      "class": "P01",
+      "slot": 3,
+      "targets": 6,
+      "correct": 6,
+      "wrong": 0,
+      "missed": 0,
+      "class_accuracy": 1.0
+    },
+    {
+      "class": "P01",
+      "slot": 4,
+      "targets": 6,
+      "correct": 5,
+      "wrong": 1,
+      "missed": 0,
+      "class_accuracy": 0.8333
+    },
+    {
+      "class": "P02",
+      "slot": 1,
+      "targets": 5,
+      "correct": 4,
+      "wrong": 1,
+      "missed": 0,
+      "class_accuracy": 0.8
+    },
+    {
+      "class": "P02",
+      "slot": 2,
+      "targets": 6,
+      "correct": 6,
+      "wrong": 0,
+      "missed": 0,
+      "class_accuracy": 1.0
+    },
+    {
+      "class": "P02",
+      "slot": 3,
+      "targets": 7,
+      "correct": 7,
+      "wrong": 0,
+      "missed": 0,
+      "class_accuracy": 1.0
+    },
+    {
+      "class": "P02",
+      "slot": 4,
+      "targets": 6,
+      "correct": 6,
+      "wrong": 0,
+      "missed": 0,
+      "class_accuracy": 1.0
+    },
+    {
+      "class": "P03",
+      "slot": 1,
+      "targets": 11,
+      "correct": 10,
+      "wrong": 1,
+      "missed": 0,
+      "class_accuracy": 0.9091
+    },
+    {
+      "class": "P03",
+      "slot": 2,
+      "targets": 7,
+      "correct": 6,
+      "wrong": 1,
+      "missed": 0,
+      "class_accuracy": 0.8571
+    },
+    {
+      "class": "P03",
+      "slot": 3,
+      "targets": 8,
+      "correct": 5,
+      "wrong": 3,
+      "missed": 0,
+      "class_accuracy": 0.625
+    },
+    {
+      "class": "P03",
+      "slot": 4,
+      "targets": 5,
+      "correct": 5,
+      "wrong": 0,
+      "missed": 0,
+      "class_accuracy": 1.0
+    },
+    {
+      "class": "P04",
+      "slot": 1,
+      "targets": 7,
+      "correct": 6,
+      "wrong": 1,
+      "missed": 0,
+      "class_accuracy": 0.8571
+    },
+    {
+      "class": "P04",
+      "slot": 2,
+      "targets": 5,
+      "correct": 5,
+      "wrong": 0,
+      "missed": 0,
+      "class_accuracy": 1.0
+    },
+    {
+      "class": "P04",
+      "slot": 3,
+      "targets": 7,
+      "correct": 5,
+      "wrong": 1,
+      "missed": 1,
+      "class_accuracy": 0.7143
+    },
+    {
+      "class": "P04",
+      "slot": 4,
+      "targets": 8,
+      "correct": 7,
+      "wrong": 1,
+      "missed": 0,
+      "class_accuracy": 0.875
+    },
+    {
+      "class": "P05",
+      "slot": 1,
+      "targets": 4,
+      "correct": 3,
+      "wrong": 1,
+      "missed": 0,
+      "class_accuracy": 0.75
+    },
+    {
+      "class": "P05",
+      "slot": 2,
+      "targets": 6,
+      "correct": 3,
+      "wrong": 2,
+      "missed": 1,
+      "class_accuracy": 0.5
+    },
+    {
+      "class": "P05",
+      "slot": 3,
+      "targets": 3,
+      "correct": 0,
+      "wrong": 2,
+      "missed": 1,
+      "class_accuracy": 0.0
+    },
+    {
+      "class": "P05",
+      "slot": 4,
+      "targets": 6,
+      "correct": 4,
+      "wrong": 2,
+      "missed": 0,
+      "class_accuracy": 0.6667
+    },
+    {
+      "class": "P06",
+      "slot": 1,
+      "targets": 4,
+      "correct": 4,
+      "wrong": 0,
+      "missed": 0,
+      "class_accuracy": 1.0
+    },
+    {
+      "class": "P06",
+      "slot": 2,
+      "targets": 6,
+      "correct": 5,
+      "wrong": 1,
+      "missed": 0,
+      "class_accuracy": 0.8333
+    },
+    {
+      "class": "P06",
+      "slot": 3,
+      "targets": 8,
+      "correct": 5,
+      "wrong": 3,
+      "missed": 0,
+      "class_accuracy": 0.625
+    },
+    {
+      "class": "P06",
+      "slot": 4,
+      "targets": 8,
+      "correct": 7,
+      "wrong": 0,
+      "missed": 1,
+      "class_accuracy": 0.875
+    }
+  ],
+  "confusions": [
+    {
+      "true": "P03",
+      "predicted": "P05",
+      "count": 3
+    },
+    {
+      "true": "P05",
+      "predicted": "P03",
+      "count": 3
+    },
+    {
+      "true": "P06",
+      "predicted": "P02",
+      "count": 2
+    },
+    {
+      "true": "P05",
+      "predicted": "P06",
+      "count": 2
+    },
+    {
+      "true": "P03",
+      "predicted": "P06",
+      "count": 1
+    },
+    {
+      "true": "P04",
+      "predicted": "P01",
+      "count": 1
+    },
+    {
+      "true": "P02",
+      "predicted": "P06",
+      "count": 1
+    },
+    {
+      "true": "P03",
+      "predicted": "P02",
+      "count": 1
+    },
+    {
+      "true": "P04",
+      "predicted": "P03",
+      "count": 1
+    },
+    {
+      "true": "P01",
+      "predicted": "P02",
+      "count": 1
+    },
+    {
+      "true": "P04",
+      "predicted": "P02",
+      "count": 1
+    },
+    {
+      "true": "P05",
+      "predicted": "P01",
+      "count": 1
+    },
+    {
+      "true": "P06",
+      "predicted": "P04",
+      "count": 1
+    },
+    {
+      "true": "P05",
+      "predicted": "P02",
+      "count": 1
+    },
+    {
+      "true": "P06",
+      "predicted": "P05",
+      "count": 1
+    }
+  ],
+  "subset_rankings": {
+    "5": [
+      {
+        "kept_classes": [
+          "P01",
+          "P02",
+          "P03",
+          "P04",
+          "P06"
+        ],
+        "targets": 133,
+        "correct": 117,
+        "class_accuracy_with_current_6_class_models": 0.8797,
+        "false_positives_predicted_as_kept_class": 21
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P02",
+          "P03",
+          "P04",
+          "P05"
+        ],
+        "targets": 126,
+        "correct": 106,
+        "class_accuracy_with_current_6_class_models": 0.8413,
+        "false_positives_predicted_as_kept_class": 20
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P02",
+          "P04",
+          "P05",
+          "P06"
+        ],
+        "targets": 121,
+        "correct": 101,
+        "class_accuracy_with_current_6_class_models": 0.8347,
+        "false_positives_predicted_as_kept_class": 20
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P02",
+          "P03",
+          "P05",
+          "P06"
+        ],
+        "targets": 125,
+        "correct": 104,
+        "class_accuracy_with_current_6_class_models": 0.832,
+        "false_positives_predicted_as_kept_class": 25
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P03",
+          "P04",
+          "P05",
+          "P06"
+        ],
+        "targets": 128,
+        "correct": 104,
+        "class_accuracy_with_current_6_class_models": 0.8125,
+        "false_positives_predicted_as_kept_class": 20
+      },
+      {
+        "kept_classes": [
+          "P02",
+          "P03",
+          "P04",
+          "P05",
+          "P06"
+        ],
+        "targets": 127,
+        "correct": 103,
+        "class_accuracy_with_current_6_class_models": 0.811,
+        "false_positives_predicted_as_kept_class": 24
+      }
+    ],
+    "4": [
+      {
+        "kept_classes": [
+          "P01",
+          "P02",
+          "P03",
+          "P04"
+        ],
+        "targets": 107,
+        "correct": 96,
+        "class_accuracy_with_current_6_class_models": 0.8972,
+        "false_positives_predicted_as_kept_class": 15
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P02",
+          "P04",
+          "P06"
+        ],
+        "targets": 102,
+        "correct": 91,
+        "class_accuracy_with_current_6_class_models": 0.8922,
+        "false_positives_predicted_as_kept_class": 15
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P02",
+          "P03",
+          "P06"
+        ],
+        "targets": 106,
+        "correct": 94,
+        "class_accuracy_with_current_6_class_models": 0.8868,
+        "false_positives_predicted_as_kept_class": 20
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P03",
+          "P04",
+          "P06"
+        ],
+        "targets": 109,
+        "correct": 94,
+        "class_accuracy_with_current_6_class_models": 0.8624,
+        "false_positives_predicted_as_kept_class": 15
+      },
+      {
+        "kept_classes": [
+          "P02",
+          "P03",
+          "P04",
+          "P06"
+        ],
+        "targets": 108,
+        "correct": 93,
+        "class_accuracy_with_current_6_class_models": 0.8611,
+        "false_positives_predicted_as_kept_class": 19
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P02",
+          "P04",
+          "P05"
+        ],
+        "targets": 95,
+        "correct": 80,
+        "class_accuracy_with_current_6_class_models": 0.8421,
+        "false_positives_predicted_as_kept_class": 14
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P02",
+          "P03",
+          "P05"
+        ],
+        "targets": 99,
+        "correct": 83,
+        "class_accuracy_with_current_6_class_models": 0.8384,
+        "false_positives_predicted_as_kept_class": 19
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P02",
+          "P05",
+          "P06"
+        ],
+        "targets": 94,
+        "correct": 78,
+        "class_accuracy_with_current_6_class_models": 0.8298,
+        "false_positives_predicted_as_kept_class": 19
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P03",
+          "P04",
+          "P05"
+        ],
+        "targets": 102,
+        "correct": 83,
+        "class_accuracy_with_current_6_class_models": 0.8137,
+        "false_positives_predicted_as_kept_class": 14
+      },
+      {
+        "kept_classes": [
+          "P02",
+          "P03",
+          "P04",
+          "P05"
+        ],
+        "targets": 101,
+        "correct": 82,
+        "class_accuracy_with_current_6_class_models": 0.8119,
+        "false_positives_predicted_as_kept_class": 18
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P04",
+          "P05",
+          "P06"
+        ],
+        "targets": 97,
+        "correct": 78,
+        "class_accuracy_with_current_6_class_models": 0.8041,
+        "false_positives_predicted_as_kept_class": 14
+      },
+      {
+        "kept_classes": [
+          "P02",
+          "P04",
+          "P05",
+          "P06"
+        ],
+        "targets": 96,
+        "correct": 77,
+        "class_accuracy_with_current_6_class_models": 0.8021,
+        "false_positives_predicted_as_kept_class": 18
+      },
+      {
+        "kept_classes": [
+          "P01",
+          "P03",
+          "P05",
+          "P06"
+        ],
+        "targets": 101,
+        "correct": 81,
+        "class_accuracy_with_current_6_class_models": 0.802,
+        "false_positives_predicted_as_kept_class": 19
+      },
+      {
+        "kept_classes": [
+          "P02",
+          "P03",
+          "P05",
+          "P06"
+        ],
+        "targets": 100,
+        "correct": 80,
+        "class_accuracy_with_current_6_class_models": 0.8,
+        "false_positives_predicted_as_kept_class": 23
+      },
+      {
+        "kept_classes": [
+          "P03",
+          "P04",
+          "P05",
+          "P06"
+        ],
+        "targets": 103,
+        "correct": 80,
+        "class_accuracy_with_current_6_class_models": 0.7767,
+        "false_positives_predicted_as_kept_class": 18
+      }
+    ]
+  },
+  "subset_note": "Screening only: these use the current 6-class out-of-fold models; retraining fewer classes may differ.",
+  "total_false_positives": 26
+}

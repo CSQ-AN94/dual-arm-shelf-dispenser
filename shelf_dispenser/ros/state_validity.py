@@ -71,7 +71,18 @@ def main():
                     "label": item.get("label", ""),
                     "valid": bool(response.valid),
                     "contacts": [
-                        [c.contact_body_1, c.contact_body_2]
+                        {
+                            "bodies": [c.contact_body_1, c.contact_body_2],
+                            # Where, not just what: a name pair says two things
+                            # touch, the point says which end of the gripper and
+                            # how far into the box it reaches.
+                            "position": [
+                                float(c.position.x),
+                                float(c.position.y),
+                                float(c.position.z),
+                            ],
+                            "depth": float(c.depth),
+                        }
                         for c in response.contacts
                     ],
                 }

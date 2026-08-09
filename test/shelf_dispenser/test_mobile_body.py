@@ -11,6 +11,7 @@ from shelf_dispenser.core import SafetyAbort
 from shelf_dispenser.mobile_body import (
     BodySnapshot,
     ChassisState,
+    LiftSocketAdapter,
     LiftState,
     MobileBodyCoordinator,
     ReturnAuthorization,
@@ -74,6 +75,36 @@ def test_woosh_pose_parser_reads_live_pose_and_twist():
     assert state.x_m == pytest.approx(1.25)
     assert state.y_m == pytest.approx(-0.4)
     assert state.yaw_rad == pytest.approx(3.10)
+
+
+def test_lift_socket_waits_for_async_motion_to_finish(monkeypatch):
+    adapter = LiftSocketAdapter(timeout_s=1.0)
+    states = iter(
+        [
+            _lift(647),
+            _lift(647),
+            LiftState(354, True, 0, 4, 1.0),
+            _lift(250),
+        ]
+    )
+
+    def request(payload):
+        if payload["command"] == "get_lift_state":
+            state = next(states)
+            return {
+                "state": "lift_state",
+                "height": state.height_mm,
+                "en_flag": 1,
+                "err_flag": 0,
+                "mode": state.mode,
+            }
+        assert payload["command"] == "set_lift_height"
+        return {"error_code": 0}
+
+    monkeypatch.setattr(adapter, "_request", request)
+    monkeypatch.setattr(mobile_body_module.time, "sleep", lambda _seconds: None)
+
+    assert adapter.move_to(250, speed=30).height_mm == 250
 
 
 def test_woosh_motion_adapter_forwards_shared_stop_as_sigint(monkeypatch):

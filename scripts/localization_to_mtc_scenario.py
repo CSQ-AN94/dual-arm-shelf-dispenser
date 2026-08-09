@@ -191,8 +191,11 @@ def build_scenario(
     rotation = profile.T_moveit_from_profile[:3, :3]
     approach_profile = rotation.T @ approach
     pick_radius_m = None
+    pick_height_m = None
+    pick_graspable_height_m = None
     if pick_only:
-        radius = (template.get("bottle") or {}).get("radius_m")
+        bottle_template = template.get("bottle") or {}
+        radius = bottle_template.get("radius_m")
         if (
             isinstance(radius, bool)
             or not isinstance(radius, (int, float))
@@ -201,6 +204,37 @@ def build_scenario(
         ):
             raise SafetyAbort("pick-only 模板 bottle.radius_m 必须是正有限数")
         pick_radius_m = float(radius)
+        height = bottle_template.get("height_m")
+        graspable_height = bottle_template.get(
+            "graspable_cylinder_height_m"
+        )
+        if (
+            isinstance(height, bool)
+            or not isinstance(height, (int, float))
+            or not math.isfinite(float(height))
+            or isinstance(graspable_height, bool)
+            or not isinstance(graspable_height, (int, float))
+            or not math.isfinite(float(graspable_height))
+            or not 0.0 < float(graspable_height) <= float(height)
+        ):
+            raise SafetyAbort(
+                "pick-only 模板必须提供有效瓶高和可抓圆柱段高度"
+            )
+        pick_height_m = float(height)
+        pick_graspable_height_m = float(graspable_height)
+        fraction = (
+            profile.grasp_height_fraction
+            if profile.grasp_height_fraction is not None
+            else params.grasp_height_fraction
+        )
+        forbidden_top_m = pick_height_m - pick_graspable_height_m
+        planned_from_top_m = float(fraction) * pick_height_m
+        if planned_from_top_m <= forbidden_top_m:
+            raise SafetyAbort(
+                "抓取点落在瓶颈/瓶盖禁抓区: "
+                f"from_top={planned_from_top_m:.3f}m, "
+                f"forbidden_top={forbidden_top_m:.3f}m"
+            )
     # The fixed head sees the near surface, and grasp_stop_short_m is the one
     # working distance in this project: it was tuned on the real right arm
     # until grasps held, so it already absorbs whatever the true link7->finger
@@ -470,7 +504,20 @@ def build_scenario(
         if pick_only and non_target_moveit:
             centre = np.asarray(bottle_center, dtype=float)
             half_height = float(bottle["height_m"]) / 2.0 + voxel_size / 2.0
-            radius = pick_radius_m + voxel_size / 2.0
+            # Half a voxel is the right margin along z, where the cube's face
+            # is what comes closest.  Radially it is not: the cube can present
+            # a CORNER to the axis, and that corner reaches voxel/sqrt(2) --
+            # 17.7 mm at 25 mm cells, not 12.5.  A voxel centred between
+            # 45.5 mm and 50.7 mm from the axis therefore survived this filter
+            # and still collided with the 33 mm bottle, which is exactly what
+            # 2026-08-07 saw: target_cylinder_voxels_removed = 0 on captures
+            # whose attach_bottle failed with "head_rgbd_non_target colliding
+            # with bottle" five times running.
+            #
+            # empty_shelf_places_to_mtc_scenario.py already had this right
+            # (voxel_size / sqrt(2)); the same geometry was written twice with
+            # two different margins and the pick side took the smaller one.
+            radius = pick_radius_m + voxel_size / math.sqrt(2.0)
             kept = [
                 voxel
                 for voxel in non_target_moveit

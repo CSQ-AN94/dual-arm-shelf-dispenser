@@ -48,11 +48,18 @@ def test_shelf_grasp_start_is_recorded_separately_from_home():
 
     assert profile.grasp_start_right_joints_deg == pytest.approx(RIGHT)
     assert profile.grasp_start_left_joints_deg == pytest.approx(LEFT)
+    assert "完成一次左臂归位" in profile.description
     assert profile.grasp_start_lift_height_mm == 647
     assert profile.home_joints_deg != pytest.approx(RIGHT)
     shelf_bottom = next(
         box for box in profile.keepout_boxes if box.id == "shelf_bottom"
     )
+    # A head-camera plane fit on 2026-08-04 returned -0.2103 with 1241 inliers
+    # and I changed this to match it.  A hand-taught grasp an hour later put the
+    # TCP 90 mm above the panel by the operator's own eye, which places the
+    # panel at -0.244 -- the value that was already here.  The camera fit was
+    # confident and wrong, most likely latching onto the shelf lip or an
+    # adjacent layer.  Inlier count is not accuracy.
     assert shelf_bottom.maximum[2] == pytest.approx(-0.2432)
 
 
