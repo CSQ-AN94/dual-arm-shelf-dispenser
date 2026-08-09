@@ -69,6 +69,13 @@ UPPER_SHELF_SURFACE_GROUND_M = 0.995
 LOWER_SHELF_SURFACE_GROUND_M = 0.625
 UPPER_SHELF_LIFT_MM = 647
 LOWER_SHELF_SURFACE_TOLERANCE_M = 0.025
+# How far a perceived empty patch may sit behind the taught depth before the
+# pull-back stops being a correction and starts being a guess.  The 2026-08-08
+# failure was 55 mm; the lower shelf's floor is only 460 mm deep and the taught
+# points sit 82 mm behind its lip, so a candidate more than 80 mm past them is
+# not the same slot seen imprecisely, it is a different surface.  Refuse rather
+# than drag the bottle 150 mm forward and drop it off the front edge.
+MAX_DEPTH_PULLBACK_M = 0.080
 
 
 def select_place_demonstration(
@@ -419,6 +426,39 @@ def main(argv: list[str] | None = None) -> int:
         - target_tcp[:3, :3] @ bottle_center_in_tcp
     )
     target_moveit = profile.T_moveit_from_profile @ target_tcp
+    # Perception says WHERE ALONG THE ROW the slot is free.  It does not get to
+    # say how deep.  The empty-patch centroid is biased toward the back of the
+    # shelf -- the lip and the neighbouring bottles occlude the front, so the
+    # visible free surface starts behind the reachable part of it -- and the ROI
+    # widening of 2026-08-07 (140 mm -> 350 mm of depth, needed to get any
+    # candidates at all) removed the only thing that had been bounding it.
+    #
+    # 2026-08-08 it asked for a place 55 mm behind the taught depth at the same
+    # row position, which is 30 mm past where the right arm can reach with this
+    # orientation at all.  Nothing downstream noticed: the template match is
+    # validated on x only, so `orientation_template_x_error_m` read 1.6 mm while
+    # the endpoint sat outside the workspace.  target_approach then truncated at
+    # fraction 0.655 and MoveIt reported only "failed to move full distance",
+    # which reads like a collision and is not one: an unreachable goal has no
+    # colliding pair to find, so looking for one finds nothing.
+    #
+    # The taught point is a demonstrated depth: a human drove the arm there, so
+    # it is reachable by construction.  Never place beyond it.  Deeper is the
+    # only unsafe direction -- pulling the bottle toward the shelf mouth keeps
+    # it on the same support and strictly inside the reachable set.
+    template_depth_m = float(
+        selected_template["candidate"]["tcp_pose_moveit"]["xyz"][1]
+    )
+    requested_depth_m = float(target_moveit[1, 3])
+    depth_pullback_m = max(0.0, template_depth_m - requested_depth_m)
+    if depth_pullback_m > MAX_DEPTH_PULLBACK_M:
+        raise SafetyAbort(
+            "空位候选比已示教深度深 "
+            f"{depth_pullback_m * 1000:.0f} mm，超过 "
+            f"{MAX_DEPTH_PULLBACK_M * 1000:.0f} mm 上限；"
+            "感知与行模板对不上，拒绝硬拉回"
+        )
+    target_moveit[1, 3] = requested_depth_m + depth_pullback_m
     held_tcp_moveit = profile.T_moveit_from_profile @ held_tcp
     held_center_moveit = profile.point_to_moveit(held_center)
     required_raise_m = _transit_raise_m(
@@ -551,6 +591,9 @@ def main(argv: list[str] | None = None) -> int:
             "lower_shelf_surface_ground_m": LOWER_SHELF_SURFACE_GROUND_M,
             "orientation_template_point_id": selected_template["point_id"],
             "orientation_template_x_error_m": selected_template["x_error_m"],
+            "template_depth_m": template_depth_m,
+            "requested_depth_m": requested_depth_m,
+            "depth_pullback_m": depth_pullback_m,
             "place_demonstration": selected_demo["path"],
             "target_slot": route["slot_id"],
             "place_demonstration_label": selected_demo["label"],

@@ -150,7 +150,7 @@ for i in 1 2 3 4 5 6; do
     || { echo "    夹爪标定失败: $(grep -E '拒绝|SafetyAbort' "$O/cal$i.log" | tail -1)"; continue; }
   $PY scripts/capture_mtc_direct_pick_scene.py --target-product "$PRODUCT_CODE" \
     --scenario-out "$O/p$i.yaml" > "$O/pc$i.log" 2>&1 \
-    || { echo "    采集失败: $(grep -E '拒绝|Error' "$O/pc$i.log" | tail -1)"; continue; }
+    || { echo "    采集失败: $(grep -E '拒绝|SafetyAbort|Error' "$O/pc$i.log" | tail -1)"; continue; }
   $PY scripts/apply_demonstrated_grasp_to_scenario.py "$O/p$i.yaml" \
     --row-templates "$ROW_TEMPLATES" --layer upper --output "$O/p$i.yaml" > "$O/pt$i.log" 2>&1 \
     || { echo "    行模板匹配失败: $(tail -1 "$O/pt$i.log")"; continue; }
@@ -227,7 +227,7 @@ for i in 1 2 3 4 5; do
     --roi-min -0.40 0.50 -0.45 --roi-max 0.23 0.85 0.05 \
     --lift-execution-record "$O/lift_record.json" \
     --output "$O/pl$i.json" > "$O/plc$i.log" 2>&1 \
-    || { echo "    空位采集失败: $(grep -E '拒绝|Error' "$O/plc$i.log" | tail -1)"; continue; }
+    || { echo "    空位采集失败: $(grep -E '拒绝|SafetyAbort|Error' "$O/plc$i.log" | tail -1)"; continue; }
   $PY scripts/empty_shelf_places_to_mtc_scenario.py "$O/pl$i.json" "$O/pls$i.yaml" \
     --product-code "$PRODUCT_CODE" --row-templates "$ROW_TEMPLATES" > "$O/plg$i.log" 2>&1 \
     || { echo "    场景生成失败: $(tail -1 "$O/plg$i.log")"; continue; }

@@ -222,6 +222,64 @@ def test_unknown_regime_is_rejected(tmp_path):
         _run(tmp_path, payload)
 
 
+def test_a_candidate_behind_the_taught_depth_is_pulled_back_to_it(tmp_path):
+    """Perception picks the row position; the taught point fixes the depth.
+
+    The empty-patch centroid sits behind the reachable part of the free
+    surface, because the shelf lip and the neighbouring bottles hide the front
+    of it.  On 2026-08-08 that put the place target 55 mm behind the taught
+    depth -- 30 mm outside the right arm's workspace at that orientation -- and
+    target_approach truncated at Cartesian fraction 0.655 with no colliding
+    pair to find, because an unreachable goal does not have one.
+    """
+    payload = _payload()
+    payload["observation"]["candidates"] = [{"xy_base": [0.05, 0.66]}]
+
+    scenario = _run(tmp_path, payload, pick_record=_pick_record())
+    provenance = scenario["placement_provenance"]
+
+    assert provenance["depth_pullback_m"] > 0.0
+    assert provenance["requested_depth_m"] < provenance["template_depth_m"]
+    # Pulled back exactly to the taught depth, not merely nearer to it.
+    assert scenario["target_place_pose"]["xyz"][1] == pytest.approx(
+        provenance["template_depth_m"]
+    )
+    # The route the arm actually follows has to end at the corrected pose too,
+    # or the scenario would carry two different placements.
+    placed = provenance["relative_route"]["waypoints"][-1]
+    assert placed["name"] == "placed"
+    assert placed["pose"]["xyz"][1] == pytest.approx(
+        provenance["template_depth_m"]
+    )
+
+
+def test_a_shallower_candidate_is_left_alone(tmp_path):
+    """Only deeper is unsafe.  Nearer the shelf mouth is inside the taught
+    reach by construction, so the pull-back must not push a candidate back."""
+    payload = _payload()
+    payload["observation"]["candidates"] = [{"xy_base": [0.05, 0.58]}]
+
+    scenario = _run(tmp_path, payload, pick_record=_pick_record())
+    provenance = scenario["placement_provenance"]
+
+    assert provenance["depth_pullback_m"] == 0.0
+    assert scenario["target_place_pose"]["xyz"][1] == pytest.approx(
+        provenance["requested_depth_m"]
+    )
+
+
+def test_a_candidate_far_behind_the_taught_depth_is_refused(tmp_path):
+    """Past some distance this stops being a correction and starts being a
+    guess: a patch that far back is a different surface, not this slot seen
+    imprecisely.  Dragging the bottle forward from there would drop it off the
+    front edge, so refuse instead."""
+    payload = _payload()
+    payload["observation"]["candidates"] = [{"xy_base": [0.05, 0.74]}]
+
+    with pytest.raises(MODULE.SafetyAbort, match="已示教深度"):
+        _run(tmp_path, payload, pick_record=_pick_record())
+
+
 def test_place_demonstration_selection_uses_only_a_verified_terminal_state(
     tmp_path,
 ):

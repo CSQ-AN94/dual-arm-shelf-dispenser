@@ -140,7 +140,13 @@ def test_repo_root_depth_is_right_for_every_file_that_computes_it():
     import re
 
     for path in sorted(ROOT.rglob("*.py")):
-        if any(part in {".git", "__pycache__", ".mujoco_assets"} for part in path.parts):
+        # `outputs/` holds archived run evidence, including verbatim copies of
+        # the scripts a run used.  Those copies sit at a different depth on
+        # purpose and are not code anyone imports; only live code can be moved.
+        if any(
+            part in {".git", "__pycache__", ".mujoco_assets", "outputs"}
+            for part in path.parts
+        ):
             continue
         for match in re.finditer(
             r"ROOT = Path\(__file__\)\.resolve\(\)\.parents\[(\d+)\]", path.read_text(encoding="utf-8")
