@@ -64,3 +64,76 @@ def test_robot_drift_tracks_the_left_arm_safety_chain():
         "outputs/row_templates.json",
     ):
         assert f'"{relative}"' in source
+
+
+def test_robot_drift_tracks_every_reachable_runtime_module():
+    """An entry point's imports are the entry point.
+
+    The list was hand-kept and fell 18 modules behind, so `--push` reported
+    everything in sync while perception.py on the robot still carried the
+    alias set from before the trained model existed -- no p01..p06, and no
+    case folding on the allowed set.  The six-class model against that copy
+    matches nothing, and the cycle fails six captures on localization looking
+    nothing like a sync problem.  Recompute the closure instead of trusting
+    that whoever adds a module remembers to add it here too.
+    """
+    import ast
+    import re
+
+    source = (ROOT / "scripts" / "robot_code_drift.py").read_text(
+        encoding="utf-8"
+    )
+    tracked = set(
+        re.findall(r'"([^"]+)"', source.split("TRACKED = [")[1].split("]")[0])
+    )
+
+    seen: set[str] = set()
+    stack = [name for name in tracked if name.endswith(".py")]
+    while stack:
+        relative = stack.pop()
+        if relative in seen:
+            continue
+        seen.add(relative)
+        path = ROOT / relative
+        if not path.is_file():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        package = Path(relative).parent
+        for node in ast.walk(tree):
+            candidates: list[Path] = []
+            if isinstance(node, ast.Import):
+                candidates = [
+                    Path(alias.name.replace(".", "/") + ".py")
+                    for alias in node.names
+                ]
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    base = package
+                    for _ in range(node.level - 1):
+                        base = base.parent
+                    if node.module:
+                        candidates = [
+                            base / (node.module.replace(".", "/") + ".py")
+                        ]
+                    else:
+                        candidates = [
+                            base / (alias.name + ".py") for alias in node.names
+                        ]
+                elif node.module:
+                    module = Path(node.module.replace(".", "/"))
+                    candidates = [module.with_suffix(".py")]
+                    candidates += [
+                        module / (alias.name + ".py") for alias in node.names
+                    ]
+            for candidate in candidates:
+                if (ROOT / candidate).is_file():
+                    stack.append(str(candidate))
+
+    missing = sorted(seen - tracked)
+    assert not missing, (
+        "这些运行时模块能被 TRACKED 的入口 import 到，却不会被同步到机器人："
+        + ", ".join(missing)
+    )

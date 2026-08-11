@@ -30,6 +30,18 @@ DEFAULT_REMOTE = "/home/rm/dual-arm-shelf-dispenser"
 # Everything that changes where the arm goes or whether it is allowed to.
 # Deliberately not the whole tree: a drifting README is not worth an alarm that
 # people learn to ignore.
+#
+# But an entry point's imports are not optional extras -- they are the entry
+# point.  This list was hand-kept and had fallen 18 modules behind, so the tool
+# printed "✓ 已同步" while perception.py on the robot still carried the alias
+# set from before the trained model existed: no p01..p06, and no case folding
+# on the allowed set.  Pushing the new six-class model against that copy would
+# have matched nothing at all, and the cycle would have failed six captures in
+# a row on localization, looking nothing like a sync problem.
+#
+# test_robot_drift_tracks_every_reachable_runtime_module recomputes the import
+# closure and fails when this list falls behind again.  Non-Python assets still
+# have to be added by hand; nothing can derive those.
 TRACKED = [
     "config.yaml",
     "shelf_dispenser/model_assets.lock.json",
@@ -84,6 +96,24 @@ TRACKED = [
     "scripts/solve_left_arm_model.py",
     "scripts/run_cross_layer_cycle.sh",
     "outputs/row_templates.json",
+    "sensors/camera_thread.py",
+    "shelf_dispenser/camera_access.py",
+    "shelf_dispenser/collision.py",
+    "shelf_dispenser/console.py",
+    "shelf_dispenser/dashboard.py",
+    "shelf_dispenser/delivery_table.py",
+    "shelf_dispenser/environment_guard.py",
+    "shelf_dispenser/head_lock.py",
+    "shelf_dispenser/lift_evidence.py",
+    "shelf_dispenser/mobile_body.py",
+    "shelf_dispenser/model_assets.py",
+    "shelf_dispenser/perception.py",
+    "shelf_dispenser/ros/scene_ids.py",
+    "shelf_dispenser/run_manifest.py",
+    "shelf_dispenser/table_model.py",
+    "shelf_dispenser/target_guard.py",
+    "shelf_dispenser/workflows.py",
+    "utils/config.py",
     "outputs/demonstrated_trajectories/place_A1_left_20260808.json",
     "outputs/demonstrated_trajectories/place_A2_left_20260808.json",
     "outputs/demonstrated_trajectories/place_A3_right_20260808.json",
