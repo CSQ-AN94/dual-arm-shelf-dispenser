@@ -1,0 +1,317 @@
+[
+  {
+    "fold": 0,
+    "best_epoch": 66,
+    "precision": 0.98213,
+    "recall": 0.99279,
+    "map50": 0.995,
+    "map50_95": 0.97204,
+    "gt": 47,
+    "correct": 47,
+    "wrong_class": 0,
+    "missed": 0,
+    "false_positive": 0,
+    "errors": [],
+    "confidence_min": 0.5213397741317749,
+    "confidence_median": 0.9587640166282654,
+    "wrong_confidence_median": 0,
+    "per_class": {
+      "P01": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P02": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P03": {
+        "gt": 11,
+        "correct": 11,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P04": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P05": {
+        "gt": 14,
+        "correct": 14,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P06": {
+        "gt": 7,
+        "correct": 7,
+        "wrong": 0,
+        "missed": 0
+      }
+    },
+    "confusion": {},
+    "false_by_class": {}
+  },
+  {
+    "fold": 1,
+    "best_epoch": 79,
+    "precision": 0.98172,
+    "recall": 0.9959,
+    "map50": 0.995,
+    "map50_95": 0.9686,
+    "gt": 45,
+    "correct": 45,
+    "wrong_class": 0,
+    "missed": 0,
+    "false_positive": 2,
+    "errors": [
+      "4d935754876f232ff3dbb6e49271842e_31.jpg: false P03 (0.402)",
+      "ede37697e4840a7fe9c3c000ceafc106_101.jpg: false P05 (0.798)"
+    ],
+    "confidence_min": 0.3351939022541046,
+    "confidence_median": 0.9640005826950073,
+    "wrong_confidence_median": 0,
+    "per_class": {
+      "P01": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P02": {
+        "gt": 4,
+        "correct": 4,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P03": {
+        "gt": 9,
+        "correct": 9,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P04": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P05": {
+        "gt": 14,
+        "correct": 14,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P06": {
+        "gt": 8,
+        "correct": 8,
+        "wrong": 0,
+        "missed": 0
+      }
+    },
+    "confusion": {},
+    "false_by_class": {
+      "P03": 1,
+      "P05": 1
+    }
+  },
+  {
+    "fold": 2,
+    "best_epoch": 43,
+    "precision": 0.98,
+    "recall": 0.97794,
+    "map50": 0.995,
+    "map50_95": 0.92931,
+    "gt": 45,
+    "correct": 45,
+    "wrong_class": 0,
+    "missed": 0,
+    "false_positive": 0,
+    "errors": [],
+    "confidence_min": 0.7189934849739075,
+    "confidence_median": 0.9690229892730713,
+    "wrong_confidence_median": 0,
+    "per_class": {
+      "P01": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P02": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P03": {
+        "gt": 10,
+        "correct": 10,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P04": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P05": {
+        "gt": 13,
+        "correct": 13,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P06": {
+        "gt": 7,
+        "correct": 7,
+        "wrong": 0,
+        "missed": 0
+      }
+    },
+    "confusion": {},
+    "false_by_class": {}
+  },
+  {
+    "fold": 3,
+    "best_epoch": 56,
+    "precision": 0.92188,
+    "recall": 1.0,
+    "map50": 0.995,
+    "map50_95": 0.95751,
+    "gt": 45,
+    "correct": 44,
+    "wrong_class": 0,
+    "missed": 1,
+    "false_positive": 6,
+    "errors": [
+      "0fde4084933717f6bf697caaa97a544e_12.jpg: false P06 (0.271)",
+      "1e6fed2df7cdc48acd02954bfd91cc93_95.jpg: false P01 (0.509)",
+      "1e6fed2df7cdc48acd02954bfd91cc93_95.jpg: false P02 (0.400)",
+      "967da1b1a173bc45931442b1bc3b5d3f_60.jpg: false P03 (0.541)",
+      "9c23ffd986befeec42284ca320566eaa_99.jpg: false P03 (0.370)",
+      "a1e9dbe3e2b1676ed822139ddd6f2ff2_65.jpg: missed P02",
+      "d092ff0b4b389f3183b5f604f32bde3c_79.jpg: false P03 (0.334)"
+    ],
+    "confidence_min": 0.2608344554901123,
+    "confidence_median": 0.9419376850128174,
+    "wrong_confidence_median": 0,
+    "per_class": {
+      "P01": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P02": {
+        "gt": 7,
+        "correct": 6,
+        "wrong": 0,
+        "missed": 1
+      },
+      "P03": {
+        "gt": 9,
+        "correct": 9,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P04": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P05": {
+        "gt": 12,
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P06": {
+        "gt": 7,
+        "correct": 7,
+        "wrong": 0,
+        "missed": 0
+      }
+    },
+    "confusion": {},
+    "false_by_class": {
+      "P06": 1,
+      "P01": 1,
+      "P02": 1,
+      "P03": 3
+    }
+  },
+  {
+    "fold": 4,
+    "best_epoch": 110,
+    "precision": 0.9624,
+    "recall": 0.96667,
+    "map50": 0.98944,
+    "map50_95": 0.94244,
+    "gt": 47,
+    "correct": 47,
+    "wrong_class": 0,
+    "missed": 0,
+    "false_positive": 5,
+    "errors": [
+      "3a965f7bfc93779eafdd4d07dd3b85e4_26.jpg: false P03 (0.752)",
+      "5d7b7522b45f1890b754ac085cc9fd18_36.jpg: false P01 (0.511)",
+      "5d7b7522b45f1890b754ac085cc9fd18_36.jpg: false P03 (0.268)",
+      "5fafadd20c73f997a6345f00746de8b6_41.jpg: false P04 (0.317)",
+      "72dcea60dc83b79e525e986e267e74de_48.jpg: false P05 (0.698)"
+    ],
+    "confidence_min": 0.27449652552604675,
+    "confidence_median": 0.960157036781311,
+    "wrong_confidence_median": 0,
+    "per_class": {
+      "P01": {
+        "gt": 6,
+        "correct": 6,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P02": {
+        "gt": 5,
+        "correct": 5,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P03": {
+        "gt": 8,
+        "correct": 8,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P04": {
+        "gt": 6,
+        "correct": 6,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P05": {
+        "gt": 14,
+        "correct": 14,
+        "wrong": 0,
+        "missed": 0
+      },
+      "P06": {
+        "gt": 8,
+        "correct": 8,
+        "wrong": 0,
+        "missed": 0
+      }
+    },
+    "confusion": {},
+    "false_by_class": {
+      "P03": 2,
+      "P01": 1,
+      "P04": 1,
+      "P05": 1
+    }
+  }
+]
