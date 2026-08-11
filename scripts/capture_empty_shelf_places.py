@@ -26,6 +26,7 @@ from shelf_dispenser.mobile_body import LiftSocketAdapter
 from shelf_dispenser.relative_place import product_geometry
 from shelf_dispenser.safety import load_safety_profile
 from shelf_dispenser.scene import (
+    drop_floating_fragments,
     head_scene_points,
     union_scene_voxels,
     voxelize_scene_points,
@@ -435,6 +436,32 @@ def main(argv: list[str] | None = None) -> int:
             len(kept_voxels),
         )
         voxels = kept_voxels
+        # The pick scene has dropped floating fragments since 2026-08-07; the
+        # place scene never did, and the transit is where it costs.  2026-08-11:
+        # the held bottle swept the voxel cloud on the way to the demonstrated
+        # gate, MTC refused transport_to_demonstrated_preplace with "Waypoint is
+        # in collision!", and every voxel the bottle could touch along that path
+        # -- 3 cells at 62% of the sweep, 14 at 75%, 12 at the gate -- was a
+        # floating fragment.  The demonstrated branch plans one deterministic
+        # joint interpolation with no sampled sibling, so a fragment in the
+        # corridor has nothing to fall back on and the whole place fails.
+        #
+        # Same judgement as the pick side, and it rests on the same domain
+        # constraint: this shelf only ever holds drinks, so a cluster that is
+        # both too short to be a bottle and floating clear of the panel is not
+        # a short bottle.  See drop_floating_fragments for why BOTH conditions
+        # are required.
+        voxels, floating_dropped = drop_floating_fragments(
+            voxels,
+            demo.params.scene_voxel_m,
+            support_z=float(observation.table_height_m),
+            bottle_height_m=demo.params.held_bottle_height_m,
+        )
+        logging.info(
+            "悬空碎块扣除 删 %d 个体素，保留 %d 个",
+            floating_dropped,
+            len(voxels),
+        )
         payload = {
             "schema_version": "grabber.empty_shelf_places.v1",
             "captured_at_utc": datetime.now(timezone.utc).isoformat(),
