@@ -46,7 +46,7 @@ def stop_reason(stop_event) -> str:
 @dataclass
 class DemoParams:
     samples: int = 7
-    confidence: float = 0.45
+    confidence: float = 0.35
     min_depth_m: float = 0.12
     max_depth_m: float = 0.65
     max_depth_mad_m: float = 0.018

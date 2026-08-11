@@ -9,6 +9,7 @@ from shelf_dispenser.core import DemoParams, SafetyAbort
 from shelf_dispenser.orchestrator import RunOrchestrator
 from shelf_dispenser.arm import (
     CONNECTED_TRAJECTORY_MAX_ERROR_DEG,
+    CONNECTED_TRAJECTORY_MAX_STEP_DEG,
     CONNECTED_TRAJECTORY_START_NOOP_DEG,
     RobotSession,
 )
@@ -218,10 +219,44 @@ def test_planned_path_queues_intermediate_points_and_blocks_only_on_final(
     )
 
     assert session.arm.commands == [
-        ([0.5, 0.2, 0.5, 0.5, 0.5, 0.5, 0.5], 75, 1, 1, 0),
+        ([0.5, 0.2, 0.5, 0.5, 0.5, 0.5, 0.5], 75, 0, 1, 0),
         ([1.0] * 7, 75, 0, 0, 1),
     ]
     np.testing.assert_allclose(session.arm.current, [1.0] * 7)
+
+
+def test_connected_path_blends_the_middle_and_runs_both_ends_exactly(
+    monkeypatch,
+):
+    """Free-space corners get a blend radius; the ends of a segment do not.
+
+    A pick's second segment starts inside the bin -- lift off the support,
+    then back out -- and ends the first one at the grasp.  Cutting either of
+    those corners is what clips a shelf panel, so the blend only ever applies
+    to the transit in between, which is also where the juddering was.
+    """
+    monkeypatch.setenv("BOTTLE_GRASP_CONTINUOUS_TRAJECTORY", "1")
+    monkeypatch.setenv("BOTTLE_GRASP_BLEND_PERCENT", "40")
+    session = _session(follow=True)
+    # Deliberately not collinear, so the compressor keeps every point.
+    points = [
+        [0.0] * 7,
+        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0],
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0],
+    ]
+
+    session.execute_planned_joints(
+        points, 75, 0.5, expected_start_joints_deg=[0.0] * 7
+    )
+
+    radii = [command[2] for command in session.arm.commands]
+    assert len(radii) == 6
+    assert radii == [0, 0, 40, 40, 0, 0]
+    assert [command[4] for command in session.arm.commands] == [0] * 5 + [1]
 
 
 def test_connected_path_is_compressed_below_controller_queue_limit():
@@ -274,21 +309,48 @@ def test_connected_path_keeps_a_genuine_first_waypoint():
     assert CONNECTED_TRAJECTORY_START_NOOP_DEG <= CONNECTED_TRAJECTORY_MAX_ERROR_DEG
 
 
-def test_connected_path_rejects_an_overlarge_original_step():
-    with pytest.raises(SafetyAbort, match="单段上限"):
-        RobotSession._compress_connected_joint_path(
-            [0.0] * 7, [[16.0] * 7]
+def test_connected_path_splits_an_overlarge_step_instead_of_refusing_it():
+    """A chord too long for one command costs queue slots, not the solution.
+
+    This used to raise.  It was the single biggest filter in the system: the
+    2026-08-11 lower-layer P02 pick lost all 102 of its complete solutions to
+    the planner's mirror of this check, 21 of them while using 15 of 29
+    available commands.  Splitting is not a relaxation -- the emitted points
+    lie on the chord between two already-validated waypoints -- so the
+    invariant that has to survive is about the commands, not the refusal.
+    """
+    compressed = RobotSession._compress_connected_joint_path(
+        [0.0] * 7, [[16.0] * 7]
+    )
+
+    assert len(compressed) == 2
+    assert compressed[-1] == [16.0] * 7
+    previous = [0.0] * 7
+    for command in compressed:
+        assert max(abs(a - b) for a, b in zip(command, previous)) <= (
+            CONNECTED_TRAJECTORY_MAX_STEP_DEG + 1e-9
         )
+        previous = command
 
 
-def test_connected_path_checks_steps_hidden_inside_a_valid_shortcut():
+def test_connected_path_splits_steps_hidden_inside_a_valid_shortcut():
+    # The lead-in drop must still not let an oversized step through unsplit:
+    # dropping the noop makes the first chord 15.019 deg, which is one command
+    # too many, and every emitted command has to stay inside the limit.
     middle = [-0.019, 0.019, 0.0, 0.0, 0.0, 0.0, 0.0]
     end = [15.0, 15.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-    with pytest.raises(SafetyAbort, match="单段上限"):
-        RobotSession._compress_connected_joint_path(
-            [0.0] * 7, [middle, end]
+    compressed = RobotSession._compress_connected_joint_path(
+        [0.0] * 7, [middle, end]
+    )
+
+    assert compressed[-1] == end
+    previous = [0.0] * 7
+    for command in compressed:
+        assert max(abs(a - b) for a, b in zip(command, previous)) <= (
+            CONNECTED_TRAJECTORY_MAX_STEP_DEG + 1e-9
         )
+        previous = command
 
 
 def test_planned_path_rejects_controller_joint_limit_without_moving():

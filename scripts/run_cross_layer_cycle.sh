@@ -23,11 +23,27 @@ O=${CYCLE_OUT:-/home/rm/cycle}
 SPEED=${CYCLE_SPEED:-100}
 ROW_TEMPLATES=${ROW_TEMPLATES:-$G/outputs/row_templates.json}
 PRODUCT_CODE=${PRODUCT_CODE:-}
+# Which shelf layer to pick from.  The lift carries the whole torso, so the
+# lower layer is the same arm configuration and the same head view 397 mm down:
+# LAYER=lower homes at 647 as always, then descends before it looks.
+LAYER=${LAYER:-upper}
+# Stop after the arm is back on the taught tuck pose, holding the bottle.  For
+# runs where a person takes the bottle off and resets the shelf between picks.
+PICK_ONLY=${PICK_ONLY:-0}
 
 case "$PRODUCT_CODE" in
   P01|P02|P03|P04|P05|P06) ;;
   *) echo "拒绝: 必须用 PRODUCT_CODE=P01..P06 指明当前瓶型" >&2; exit 1 ;;
 esac
+case "$LAYER" in
+  upper) PICK_LIFT_MM=647 ;;
+  lower) PICK_LIFT_MM=250 ;;
+  *) echo "拒绝: LAYER 必须是 upper 或 lower" >&2; exit 1 ;;
+esac
+[ "$PICK_ONLY" = 1 ] || [ "$LAYER" = upper ] || {
+  echo "拒绝: 下层抓取之后没有更低的层可放，LAYER=lower 只支持 PICK_ONLY=1" >&2
+  exit 1
+}
 
 # $O gets wiped, so only ever wipe a directory this script created.  Comparing
 # against $HOME or the repo path is not enough -- it depends on who is running
@@ -139,6 +155,29 @@ else
   fail "$O/norm.log"
 fi
 
+if [ "$LAYER" = lower ]; then
+  # Empty gripper, arm on the taught tuck pose (the gate above just proved
+  # both), so this is the same descent the cross-layer cycle makes holding a
+  # bottle -- minus the bottle.  It happens before the stack starts so the
+  # bridge publishes 250 from its first sample and the plan is made there.
+  say "阶段 1.5  升降 647 -> $PICK_LIFT_MM（空手下降，为下层抓取）"
+  cd "$G"
+  if $PY -c "
+import sys; sys.path.insert(0, '.')
+from shelf_dispenser.mobile_body import LiftSocketAdapter
+from utils.config import load_config
+cfg = load_config('config.yaml')
+lift = LiftSocketAdapter(cfg.connections.left_arm_ip, cfg.connections.arm_port)
+after = lift.move_to($PICK_LIFT_MM, speed=30)
+print(after)
+sys.exit(0 if abs(int(after.height_mm) - $PICK_LIFT_MM) <= 5 else 1)
+" > "$O/lift_down.log" 2>&1; then
+    echo "  OK"
+  else
+    fail "$O/lift_down.log"
+  fi
+fi
+
 start_stack pick
 
 say "阶段 2  抓取（标定+采集+规划+执行 都在同一次尝试内）"
@@ -146,13 +185,14 @@ PICKED=0
 for i in 1 2 3 4 5 6; do
   echo "  --- 尝试 $i ---"
   cd "$G"
-  $PY scripts/calibrate_mtc_gripper.py --record "$O/grip.json" --execute > "$O/cal$i.log" 2>&1 \
+  $PY scripts/calibrate_mtc_gripper.py --record "$O/grip.json" \
+    --expected-lift-mm "$PICK_LIFT_MM" --execute > "$O/cal$i.log" 2>&1 \
     || { echo "    夹爪标定失败: $(grep -E '拒绝|SafetyAbort' "$O/cal$i.log" | tail -1)"; continue; }
   $PY scripts/capture_mtc_direct_pick_scene.py --target-product "$PRODUCT_CODE" \
     --scenario-out "$O/p$i.yaml" > "$O/pc$i.log" 2>&1 \
     || { echo "    采集失败: $(grep -E '拒绝|SafetyAbort|Error' "$O/pc$i.log" | tail -1)"; continue; }
   $PY scripts/apply_demonstrated_grasp_to_scenario.py "$O/p$i.yaml" \
-    --row-templates "$ROW_TEMPLATES" --layer upper --output "$O/p$i.yaml" > "$O/pt$i.log" 2>&1 \
+    --row-templates "$ROW_TEMPLATES" --layer "$LAYER" --output "$O/p$i.yaml" > "$O/pt$i.log" 2>&1 \
     || { echo "    行模板匹配失败: $(tail -1 "$O/pt$i.log")"; continue; }
   cd "$G/mtc_ws" && source_mtc_workspace
   rm -f "$O/p$i.json"*
@@ -180,7 +220,6 @@ for i in 1 2 3 4 5 6; do
   fi
 done
 [ "$PICKED" = 1 ] || { echo "抓取阶段失败"; echo CYCLE_DONE; exit 1; }
-cleanup_stack
 
 # carry_home's target IS grasp_start_right_joints_deg -- the same pose
 # normalize_right_arm drives to.  The difference was everything around it:
@@ -190,13 +229,25 @@ cleanup_stack
 # 16 s against 1 s.  Both arms of the cycle retract, so it is twice that.
 # The tuck evidence this used to stamp into the pick record now only feeds the
 # lift's advisory block, which no longer gates anything.
-say "阶段 2.5  持瓶回收拢位（无相机通路）"
+# The stack stays up across this one.  Tucking is a single joint-space move to
+# a taught pose, and it used to spend most of its wall clock booting a second
+# move_group next to the one that had just planned the pick -- measured
+# 2026-08-08 at 22 s for roughly 3 s of motion.  Same model, same read-only
+# stack, so hand it the running one and tear the stack down afterwards.
+say "阶段 2.5  持瓶回收拢位（无相机通路，复用规划栈）"
 cd "$G"
-if $PY scripts/normalize_right_arm.py --skip-lift --speed 30 \
+if SHELF_REUSE_MOVEIT=1 $PY scripts/normalize_right_arm.py --skip-lift --speed 30 \
     --execute > "$O/tuck.log" 2>&1; then
   echo "  OK"
 else
   fail "$O/tuck.log"
+fi
+cleanup_stack
+
+if [ "$PICK_ONLY" = 1 ]; then
+  say "抓取完成，右臂已在收拢位，升降 $PICK_LIFT_MM mm"
+  echo PICK_ONLY_SUCCESS
+  exit 0
 fi
 
 say "阶段 3  升降 647 -> 250（持瓶）——首次上硬件，人守在急停旁"

@@ -4,14 +4,14 @@
   "assets": [
     {
       "role": "primary_detector",
-      "relative_path": "intelligence/yolo_models/mixed_shelf_yolo26s_all51.pt",
+      "relative_path": "intelligence/yolo_models/mixed_shelf_yolo26s_all101_corrected.pt",
       "required": true,
-      "version": "yolo26s-mixed-shelf-all51@sha256:de20012af01f",
-      "size_bytes": 20307845,
-      "sha256": "de20012af01fda682af1f87854e32670d0ce908ce432960c981f550e63235790",
-      "source_uri": "ssh://kevincsq@10.111.122.223/F:/yolo/models/mixed_shelf_yolo26s_all51.pt",
-      "source_mtime_utc": "2026-08-08T19:03:34Z",
-      "source_checked_at_utc": "2026-08-08T19:57:27Z"
+      "version": "yolo26s-mixed-shelf-all101-corrected@sha256:a91f47e8fdb3",
+      "size_bytes": 20307973,
+      "sha256": "a91f47e8fdb32ee20dddc8e5e9c7f3fdc6714a9c7ce1131358c9e7be512cbb17",
+      "source_uri": "ssh://kevincsq@10.111.122.223/F:/yolo/models/mixed_shelf_yolo26s_all101_corrected.pt",
+      "source_mtime_utc": "2026-08-11T17:27:07Z",
+      "source_checked_at_utc": "2026-08-11T17:28:19Z"
     },
     {
       "role": "fallback_detector",

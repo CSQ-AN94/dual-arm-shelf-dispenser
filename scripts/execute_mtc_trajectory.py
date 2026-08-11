@@ -152,6 +152,9 @@ def main(argv: list[str] | None = None) -> int:
                 joint_tolerance_deg=(
                     DemoParams().planned_start_tolerance_deg
                 ),
+                # The height this plan was actually made at, which is the
+                # profile's 647 for an upper-layer pick and 250 for a lower one.
+                expected_lift_height_mm=summary["lift_start_mm"],
             )
         run = execute_pick if cli.mode == "pick" else execute_place
         completed = run(

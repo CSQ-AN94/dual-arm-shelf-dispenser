@@ -122,4 +122,4 @@ llm:
 
 # 计算机视觉配置
 vision:
-  model_path: "intelligence/yolo_models/mixed_shelf_yolo26s_all51.pt"
+  model_path: "intelligence/yolo_models/mixed_shelf_yolo26s_all101_corrected.pt"

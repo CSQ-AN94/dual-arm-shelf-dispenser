@@ -201,7 +201,23 @@ def test_pick_only_stops_after_retreat_and_exports_a_blocked_contract():
     assert retreat < pick_restore < detach < place_restore
     assert PLANNER_CODE.count('p + "restore_bottle_collision_check"') == 2
     assert PLANNER_CODE.index('p + "connect_to_source_pregrasp"') < allow_touch
-    assert "pick-only export expected exactly five motion segments" in PLANNER_CODE
+    # Five motion segments, or six when the scenario names the pose to carry
+    # back to.  The count is decided by the scenario and asserted exactly,
+    # never accepted as a range: an extra segment that shows up unasked is a
+    # stage nobody audited, and this export is what the execution bridge
+    # trusts.  The carry itself is opt-in for the same reason -- a scenario
+    # that does not ask for it exports exactly what it always did.
+    assert 'scenario.post_place_home_joints_deg.empty() ? 5 : 6' in PLANNER_CODE
+    assert "pick-only export expected exactly " in PLANNER_CODE
+    assert 'p + "carry_to_grasp_start"' in PLANNER_CODE
+    # Both siblings, priced the same way, exactly like the free-space leg: the
+    # sampler alone turned a 45 deg net move into 535 deg of joint travel.
+    assert 'p + "carry_to_grasp_start_" + option.first' in PLANNER_CODE
+    carry = PLANNER_CODE.index('p + "carry_to_grasp_start"')
+    tail = PLANNER_CODE[carry : carry + 1200]
+    assert '"straight"' in tail and '"sampled"' in tail
+    assert "mtc::cost::PathLength" in tail
+    # The historical unconditional variant stays gone.
     assert 'p + "move_to_post_pick_carry"' not in PLANNER_CODE
     connect = PLANNER_CODE.index('p + "connect_to_source_pregrasp"')
     assert connect < pregrasp_ik

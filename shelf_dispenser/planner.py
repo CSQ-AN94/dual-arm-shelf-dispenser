@@ -36,6 +36,21 @@ class MoveItPlanner:
         )
 
     def start(self):
+        # Booting move_group costs 10-20 s, and the post-pick tuck pays it for
+        # one joint-space move to a taught pose -- while the plan-only stack
+        # that just planned the pick is still running the same model.  Reuse is
+        # opt-in and never implicit: only a caller that knows which stack is up
+        # (run_cross_layer_cycle.sh owns its own) may set this, because
+        # attaching to somebody else's move_group means planning against
+        # whatever robot description and planning scene they left behind.
+        # Not verified here on purpose: `ros2 service list` is a 2-3 s CLI and
+        # discovery spin-up, on a step whose whole point is that it is short,
+        # and the caller that sets this has already waited for its own stack to
+        # answer /get_planning_scene.  A false claim costs a failed plan, which
+        # fails closed and moves nothing.
+        if os.environ.get("SHELF_REUSE_MOVEIT") == "1":
+            LOG.info("复用调用方已启动的 move_group，不再另起一份")
+            return
         launch_script = self.project_root / "shelf_dispenser" / "ros" / "headless.py"
         self.log_handle = open(self.run_dir / "moveit.log", "w", encoding="utf-8")
         self.process = subprocess.Popen(
@@ -77,6 +92,11 @@ class MoveItPlanner:
         timeout_s: float,
     ) -> dict:
         """Run one ROS helper and turn transport/file failures into SafetyAbort."""
+        # Timed because this is where the wall clock actually goes.  A tuck is
+        # 2 s of motion and ~15 s of run, MoveIt reports 0.1 s of planning, and
+        # the difference is spread across calls that look free in the log.
+        # Whoever tries to make it faster next should not have to guess which.
+        started = time.monotonic()
         try:
             output_path.unlink(missing_ok=True)
             result = subprocess.run(
@@ -90,6 +110,7 @@ class MoveItPlanner:
                 text=True,
                 timeout=timeout_s,
             )
+            LOG.info("%s 子进程耗时 %.2fs", operation, time.monotonic() - started)
         except subprocess.TimeoutExpired as exc:
             raise SafetyAbort(
                 f"{operation} 超时（上限 {timeout_s:.0f}s）"

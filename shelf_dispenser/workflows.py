@@ -175,17 +175,12 @@ class BottlePickPlaceTask:
             deliver_mode = DeliverMode(deliver_mode)
         except (TypeError, ValueError) as exc:
             raise SafetyAbort(f"未知送货模式: {deliver_mode!r}") from exc
-        if deliver_mode is DeliverMode.DISPENSE:
-            # This project delivers to the shelf's lower layer, not to a side
-            # table.  The side-table code stays -- placing on a table and
-            # placing in a bin share most of their machinery, and it will be
-            # wanted again -- but the entry is closed so nothing reaches it by
-            # accident.  Reopening it means deciding what the two flows share
-            # first, starting with home_joints_deg, which they should not.
-            raise SafetyAbort(
-                "桌面送货入口已关闭：本项目出货放在下层货架。"
-                "侧桌代码保留但不接线，重开前先决定两条流程该共用什么"
-            )
+        # DISPENSE is gated by the delivery profile, not by a hard refusal
+        # here.  load_safety_profile already rejects `enabled: false`, and
+        # rejects `verified_for_execution: false` under --execute; then
+        # MobileBodyCoordinator._validated_shelf_ready fails closed on every
+        # null field and every false `*_verified` in side_table_delivery.
+        # A third refusal at the entry only hid which of those is missing.
         if StartMode(self.demo.args.task_mode) is not mode:
             raise SafetyAbort(
                 "任务模式在解析后发生变化，拒绝启动不一致的实机流程"

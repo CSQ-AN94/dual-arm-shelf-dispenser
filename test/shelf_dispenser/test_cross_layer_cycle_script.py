@@ -35,16 +35,46 @@ def test_cycle_owns_and_cleans_up_its_plan_only_move_group():
     row_template = source.index("apply_demonstrated_grasp_to_scenario.py")
     pick_plan = source.index("plan_shelf_transfer_experimental.launch.py")
     assert capture < row_template < pick_plan
-    assert '--row-templates "$ROW_TEMPLATES" --layer upper' in source
+    assert '--row-templates "$ROW_TEMPLATES" --layer "$LAYER"' in source
     assert source.count('--row-templates "$ROW_TEMPLATES"') == 2
     assert 'PRODUCT_CODE=${PRODUCT_CODE:-}' in source
     assert '--target-product "$PRODUCT_CODE"' in source
     assert source.count('--product-code "$PRODUCT_CODE"') == 2
-    assert source.index("cleanup_stack", pick_stack) < source.index(
-        'say "阶段 2.5'
+    # The tuck reuses the stack that planned the pick instead of booting a
+    # second move_group, so teardown moved to after it -- but it still happens
+    # before the place stack starts, and the trap still covers every exit.
+    tuck = source.index('say "阶段 2.5')
+    assert "SHELF_REUSE_MOVEIT=1 $PY scripts/normalize_right_arm.py" in source
+    assert tuck < source.index("cleanup_stack", tuck) < source.index(
+        "start_stack place"
     )
     assert source.index("start_stack place") < source.index('say "阶段 4')
     subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
+
+
+def test_lower_layer_pick_descends_before_it_looks_and_stops_after_the_tuck():
+    """LAYER=lower is the same pick 397 mm down, and it cannot go on to place.
+
+    The lift moves before the plan-only stack starts, so the bridge publishes
+    250 mm from its first sample and the plan is made at the height the arm
+    will execute at.  There is no layer below the lower one to place into, so
+    that combination is refused rather than left to fail three stages later.
+    """
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "LAYER=${LAYER:-upper}" in source
+    assert "PICK_ONLY=${PICK_ONLY:-0}" in source
+    assert "upper) PICK_LIFT_MM=647 ;;" in source
+    assert "lower) PICK_LIFT_MM=250 ;;" in source
+    descend = source.index('say "阶段 1.5')
+    assert source.index("normalize_to_grasp_start.py --execute") < descend
+    assert descend < source.index("start_stack pick")
+    # Every gate that asks "is the lift where this pick starts?" has to be
+    # told which layer, or it asks the profile and refuses the lower one.  The
+    # gripper calibration is the one that was missed: six attempts, all
+    # refused at 250 against an expected 647, before anything moved.
+    assert '--expected-lift-mm "$PICK_LIFT_MM"' in source
+    assert source.index("PICK_ONLY_SUCCESS") > source.index('say "阶段 2.5')
+    assert source.index("PICK_ONLY_SUCCESS") < source.index("start_stack place")
 
 
 def test_robot_drift_tracks_the_left_arm_safety_chain():
@@ -64,6 +94,30 @@ def test_robot_drift_tracks_the_left_arm_safety_chain():
         "outputs/row_templates.json",
     ):
         assert f'"{relative}"' in source
+
+
+def test_robot_drift_tracks_every_required_model_asset():
+    """A model swap changes a filename, and the sync list is keyed by filename.
+
+    The lock file and config.yaml are both tracked, so a swap that forgets this
+    list pushes a lock pointing at a weights file the robot does not have.  The
+    robot then fails asset validation on every capture, which looks like a
+    perception problem and is not one.  The import-closure test below cannot
+    catch this: weights are not importable.
+    """
+    import json
+
+    source = (ROOT / "scripts" / "robot_code_drift.py").read_text(encoding="utf-8")
+    lock = json.loads(
+        (ROOT / "shelf_dispenser" / "model_assets.lock.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    for asset in lock["assets"]:
+        if not asset.get("required"):
+            continue
+        relative = asset["relative_path"]
+        assert f'"{relative}"' in source, f"必需的模型资产不在 TRACKED 里: {relative}"
 
 
 def test_robot_drift_tracks_every_reachable_runtime_module():

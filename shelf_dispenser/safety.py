@@ -195,8 +195,17 @@ class SafetyProfile:
         lift_mode: int,
         joint_tolerance_deg: float,
         lift_tolerance_mm: int = 5,
+        expected_lift_height_mm: int | None = None,
     ) -> None:
-        """Fail closed unless the live robot matches the taught grasp start."""
+        """Fail closed unless the live robot matches the taught grasp start.
+
+        The taught arm poses are joint angles, so they are the same start for
+        either shelf layer; the lift height is not.  A lower-layer pick plans,
+        captures and reaches from 250 mm, and pinning this gate to the profile's
+        647 would refuse it for being exactly where its own plan needs it.  So a
+        caller holding a validated plan may say which height that plan was made
+        at, and the gate checks the live lift against that instead.
+        """
         expected_right = np.asarray(
             self.grasp_start_right_joints_deg, dtype=float
         )
@@ -224,11 +233,16 @@ class SafetyProfile:
             or int(lift_tolerance_mm) < 0
         ):
             raise SafetyAbort("抓取初始位关节/升降容差无效")
+        expected_lift = (
+            int(self.grasp_start_lift_height_mm)
+            if expected_lift_height_mm is None
+            else int(expected_lift_height_mm)
+        )
+        if not 0 <= expected_lift <= 2600:
+            raise SafetyAbort(f"抓取初始位升降高度无效: {expected_lift} mm")
         right_error = float(np.max(np.abs(right - expected_right)))
         left_error = float(np.max(np.abs(left - expected_left)))
-        lift_error = abs(
-            int(lift_height_mm) - int(self.grasp_start_lift_height_mm)
-        )
+        lift_error = abs(int(lift_height_mm) - expected_lift)
         if int(lift_mode) != 0:
             raise SafetyAbort(f"抓取初始位升降仍在运动: mode={lift_mode}")
         if right_error > float(joint_tolerance_deg):
@@ -245,7 +259,7 @@ class SafetyProfile:
             raise SafetyAbort(
                 "升降未回到示教抓取初始高度: "
                 f"actual={int(lift_height_mm)} mm, "
-                f"expected={self.grasp_start_lift_height_mm} mm, "
+                f"expected={expected_lift} mm, "
                 f"上限={int(lift_tolerance_mm)} mm"
             )
 

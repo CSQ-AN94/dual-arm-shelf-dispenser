@@ -59,6 +59,18 @@ CONNECTED_TRAJECTORY_MAX_STEP_DEG = 15.0
 # 0.004 deg).  Anything larger is the arm having actually moved, and still
 # fails loudly.
 CONNECTED_TRAJECTORY_START_NOOP_DEG = CONNECTED_TRAJECTORY_MAX_ERROR_DEG
+# RealMan's blend radius is a percentage, and 1 is effectively none: the
+# controller still brakes to a standstill at every queued waypoint, which is
+# what an operator sees as the arm juddering its way along a path that was
+# supposed to be one motion.  Blending rounds those corners instead, at the
+# cost of cutting inside them -- so it stays a knob, and the commands at both
+# ends of a segment never use it (see execute_planned_joints).  Both ends,
+# not just the tail: a pick's second segment *starts* inside the bin, lifting
+# off the support before it backs out, and cutting that corner takes the
+# bottle diagonally through the shelf lip instead of up and then out.  The
+# free-space middle is where a blend belongs and where the juddering is.
+CONNECTED_TRAJECTORY_BLEND_PERCENT = 40
+CONNECTED_TRAJECTORY_EXACT_END_COMMANDS = 2
 # How long a commanded point may take to settle before its tracking error is
 # judged.  Bounded so a genuinely stuck arm still fails, rather than waiting on
 # a controller that will never arrive.
@@ -857,17 +869,26 @@ class RobotSession:
         ]
         if any(point.shape != (7,) or not np.all(np.isfinite(point)) for point in path):
             raise SafetyAbort("连续轨迹压缩输入含非有限数或维度无效")
-        # Every originally planned segment is bounded before anything is
-        # dropped, so a lead-in can never hide an oversized step behind it.
-        if any(
-            float(np.max(np.abs(after - before)))
-            > CONNECTED_TRAJECTORY_MAX_STEP_DEG
-            for before, after in zip(path, path[1:])
-        ):
-            raise SafetyAbort(
-                "连续轨迹相邻原始点超过控制器单段上限 "
-                f"{CONNECTED_TRAJECTORY_MAX_STEP_DEG:.1f}°"
+        # A chord longer than one controller command is split, not refused.
+        # The inserted points lie exactly on the straight joint-space chord
+        # between two already-validated waypoints, so this changes how many
+        # queue slots the path costs and nothing about where the arm goes.
+        # Refusing here is what made the planner's own audit throw away whole
+        # solutions that were 15 commands into a 29-command budget -- see
+        # controllerTrajectorySafe in plan_shelf_transfer.cpp, which mirrors
+        # this function and had to change with it.
+        divided = [path[0]]
+        for before, after in zip(path, path[1:]):
+            span = float(np.max(np.abs(after - before)))
+            if not np.isfinite(span):
+                raise SafetyAbort("连续轨迹压缩输入含非有限数或维度无效")
+            pieces = max(
+                1, int(np.ceil(span / CONNECTED_TRAJECTORY_MAX_STEP_DEG - 1e-9))
             )
+            for piece in range(1, pieces):
+                divided.append(before + (piece / pieces) * (after - before))
+            divided.append(after)
+        path = divided
         if (
             len(path) > 2
             and float(np.max(np.abs(path[1] - path[0])))
@@ -1237,6 +1258,17 @@ class RobotSession:
         continuous = os.environ.get(
             "BOTTLE_GRASP_CONTINUOUS_TRAJECTORY", "1"
         ) != "0"
+        try:
+            blend_percent = int(
+                os.environ.get(
+                    "BOTTLE_GRASP_BLEND_PERCENT",
+                    str(CONNECTED_TRAJECTORY_BLEND_PERCENT),
+                )
+            )
+        except ValueError as exc:
+            raise SafetyAbort("BOTTLE_GRASP_BLEND_PERCENT 必须是整数") from exc
+        if not 0 <= blend_percent <= 100:
+            raise SafetyAbort("BOTTLE_GRASP_BLEND_PERCENT 必须在 0..100")
         execution_points = dense
         if continuous:
             # Preserve MoveIt's path shape while avoiding validation-only
@@ -1265,11 +1297,12 @@ class RobotSession:
         LOG.info(
             "SDK 执行 MoveIt 轨迹: %d 个控制点（原始 %d 点，"
             "安全复核 %d 个密集点），"
-            "速度 %d%%，模式=%s",
+            "速度 %d%%，交融半径 %d%%，模式=%s",
             len(execution_points),
             len(original_execution_points) if continuous else len(dense),
             len(dense),
             speed,
+            blend_percent if continuous else 0,
             "控制器连续交融" if continuous else "阻塞路点回退",
         )
         progress = ProgressReporter("轨迹执行", len(execution_points), logger=LOG)
@@ -1283,9 +1316,16 @@ class RobotSession:
                 raise SafetyAbort(reason)
             progress.update(index - 1)
             is_last = index == len(execution_points)
-            # Keep the requested connected motion while minimizing controller
-            # corner cutting around the already collision-checked waypoints.
-            radius = 0 if is_last or not continuous else 1
+            # Blend the free-space corners so the arm stops braking at every
+            # waypoint, but let both ends of each segment run exactly: those
+            # are the approach into the bin and the lift back out of it, where
+            # cutting inside the checked corner is what hits a panel.
+            exact = (
+                index <= CONNECTED_TRAJECTORY_EXACT_END_COMMANDS
+                or index
+                > len(execution_points) - CONNECTED_TRAJECTORY_EXACT_END_COMMANDS
+            )
+            radius = 0 if is_last or exact or not continuous else blend_percent
             connect = 0 if is_last or not continuous else 1
             block = 1 if is_last or not continuous else 0
             rc = self.arm.rm_movej(joints, speed, radius, connect, block)

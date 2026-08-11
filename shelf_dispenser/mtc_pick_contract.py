@@ -279,6 +279,25 @@ def validate_execution_bundle(
     ):
         raise SafetyAbort("MTC pick TCP 路径工作区约束无效")
 
+    # When the scenario asked the pick to carry back to the taught start, the
+    # trajectory has to actually end there -- otherwise the run believes the
+    # arm is tucked while it is still out in front of the shelf, and the next
+    # thing that trusts that belief is a 397 mm descent.  Scenarios without
+    # the field are the older shape, where a separate tuck follows.
+    home = scenario.get("post_place_home_joints_deg")
+    if home is not None:
+        home_deg = np.asarray(home, dtype=float)
+        endpoint = np.asarray(
+            trajectory["points"][-1]["positions_deg"], dtype=float
+        )
+        if (
+            home_deg.shape != (7,)
+            or not np.all(np.isfinite(home_deg))
+            or float(np.max(np.abs(home_deg - endpoint)))
+            > params.planned_start_tolerance_deg
+        ):
+            raise SafetyAbort("MTC pick 轨迹未回到场景指定的收拢位")
+
     start = _validate_selected_arm_start_state(
         result.get("start_state"), arm_id="right_arm", label="右臂"
     )

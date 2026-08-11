@@ -8,6 +8,7 @@ import hashlib
 import itertools
 import json
 import math
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -276,6 +277,34 @@ def build_scenario(
         ):
             scenario["source_grasp_reference_joints_deg"] = list(
                 profile.demonstrated_grasp_right_joints_deg
+            )
+        # Where the arm goes after the retreat, planned as part of the pick
+        # instead of by a second process that has to reconnect and re-plan it.
+        # Same taught pose the grasp start gate checks against, read from the
+        # same profile, so there is no second copy to drift.
+        #
+        # Off by default until one clean run on hardware says otherwise.
+        #
+        # 2026-08-11 lower layer, with the carry planned by the sampler alone:
+        # it executed, but the route was 535 deg of joint travel for a 45 deg
+        # net move (J2 walked 98 deg to finish 3.4 deg from where it started),
+        # a sibling attempt put a TCP point at x=+0.60 m and the fence refused
+        # it, and another needed one controller command far past 15 deg.  A
+        # goal posture is not a route.
+        #
+        # Both causes are now addressed -- the carry plans a straight joint
+        # line and a sampled sibling and the audit prices both, and an
+        # oversized chord is subdivided instead of killing the solution -- but
+        # neither has run on the arm.  Turn it on for one supervised pick,
+        # check the retreat's detour ratio in the export, and only then make it
+        # the default.
+        if (
+            os.environ.get("SHELF_PICK_CARRIES_HOME") == "1"
+            and planning_arm_id == "right_arm"
+            and profile.grasp_start_right_joints_deg
+        ):
+            scenario["post_place_home_joints_deg"] = list(
+                profile.grasp_start_right_joints_deg
             )
         # The offset used to be extended by grasp_stop_short_m + radius to keep
         # the standoff in place while the grasp itself moved to the bottle

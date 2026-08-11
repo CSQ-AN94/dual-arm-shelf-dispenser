@@ -368,6 +368,34 @@ def _execution_scenario(trajectory: dict) -> dict:
     }
 
 
+def test_pick_that_carries_home_must_actually_end_on_the_taught_pose():
+    """A pick can plan its own carry back; then the endpoint is a contract.
+
+    The alternative is a run that believes the arm is tucked because the
+    scenario asked for it, while the arm is still out in front of the shelf --
+    and the next thing that trusts that belief carries it down 397 mm.
+    """
+    now = datetime.now(timezone.utc)
+    trajectory = _trajectory(now)
+    trajectory["points"] = [
+        {**point, "positions_deg": [10.0 + index] * 7}
+        for index, point in enumerate(trajectory["points"])
+    ]
+    result = _execution_result(trajectory)
+    scenario = _execution_scenario(trajectory)
+
+    scenario["post_place_home_joints_deg"] = list(
+        trajectory["points"][-1]["positions_deg"]
+    )
+    assert validate_execution_bundle(result, trajectory, scenario)
+
+    scenario["post_place_home_joints_deg"] = [
+        value + 5.0 for value in trajectory["points"][-1]["positions_deg"]
+    ]
+    with pytest.raises(SafetyAbort, match="未回到场景指定的收拢位"):
+        validate_execution_bundle(result, trajectory, scenario)
+
+
 def test_execution_bundle_binds_plan_only_artifacts():
     now = datetime.now(timezone.utc)
     trajectory = _trajectory(now)

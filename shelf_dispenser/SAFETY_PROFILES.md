@@ -73,10 +73,18 @@ never writes `safety_profiles.json` itself, on purpose.
 
 `table_demo`'s task flow is verify-and-replace: pick the bottle up, then put
 it back at the same locked point (`RunOrchestrator._place_back`). A shelf/vending
-deployment instead needs to *deliver* the bottle to an output/pickup point —
-`RunOrchestrator._deliver_to_output`, selected via `task.DeliverMode.DISPENSE`
-(CLI: `--task-mode ... --dispense`). It needs two additional profile fields
-that `table_demo` does not set:
+deployment instead needs to *deliver* the bottle to an output/pickup point.
+
+`DeliverMode.DISPENSE` (CLI: `--task-mode ... --dispense`) does **not** select
+`_deliver_to_output` — it selects `RunOrchestrator._dispense_to_side_table`,
+whose contract is `side_table_delivery` in the *delivery* profile, not the two
+fields below. See `docs/side_table_delivery_reopening.md`; that flow is closed
+until its profile is measured, and `scripts/side_table_profile_status.py`
+prints what is still missing.
+
+`_deliver_to_output` is the older fixed-joint-target delivery (a bin or pickup
+window rather than a table surface). It has no production caller today. It
+needs two profile fields that `table_demo` does not set:
 
 - `output_joints_deg`: 7-number joint target for the delivery transfer, same
   contract as `home_joints_deg`. Absent by default; `_deliver_to_output`

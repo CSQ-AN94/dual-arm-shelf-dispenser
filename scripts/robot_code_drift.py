@@ -45,7 +45,7 @@ DEFAULT_REMOTE = "/home/rm/dual-arm-shelf-dispenser"
 TRACKED = [
     "config.yaml",
     "shelf_dispenser/model_assets.lock.json",
-    "intelligence/yolo_models/mixed_shelf_yolo26s_all51.pt",
+    "intelligence/yolo_models/mixed_shelf_yolo26s_all101_corrected.pt",
     "shelf_dispenser/core.py",
     "shelf_dispenser/orchestrator.py",
     "shelf_dispenser/grasp_orientation.py",
@@ -95,6 +95,10 @@ TRACKED = [
     "scripts/measure_left_arm_bridge.py",
     "scripts/solve_left_arm_model.py",
     "scripts/run_cross_layer_cycle.sh",
+    # Source only.  The binary it builds into /home/rm/agv_debug_tools is what
+    # the chassis actually runs; a matching hash here means the source agrees,
+    # not that the robot was rebuilt.
+    "scripts/woosh_rotate_relative.cpp",
     "outputs/row_templates.json",
     "sensors/camera_thread.py",
     "shelf_dispenser/camera_access.py",

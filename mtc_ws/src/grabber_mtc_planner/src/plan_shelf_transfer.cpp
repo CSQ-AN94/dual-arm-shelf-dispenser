@@ -363,10 +363,39 @@ bool controllerTrajectorySafe(
 	}
 	if (path.size() == 1)
 		return true;
+	// Subdivide a chord the controller cannot take in one command instead of
+	// refusing the whole solution.  This used to `return false` here, and it
+	// was the single biggest filter in the system: 2026-08-11, the lower-layer
+	// P02 pick produced 102 complete solutions across six attempts and every
+	// one died here, 21 of them on this alone, at 15-17 commands against a
+	// budget of 29.  The planner was not out of room, it simply could not
+	// express what it had planned.
+	//
+	// Splitting is not a relaxation.  The inserted points lie exactly on the
+	// straight joint-space chord between two waypoints the dense FK, fence and
+	// collision checks have already validated, so the commanded path is the
+	// same path; only the number of queue slots it occupies changes, and the
+	// count is still bounded below.
+	std::vector<std::vector<double>> divided{ path.front() };
 	for (std::size_t index = 1; index < path.size(); ++index)
-		if (maximumJointDelta(path[index - 1], path[index]) >
-		    EXECUTION_CONTROLLER_MAX_STEP_DEG)
+	{
+		const double span = maximumJointDelta(path[index - 1], path[index]);
+		if (!std::isfinite(span))
 			return false;
+		const auto pieces = static_cast<std::size_t>(
+		    std::ceil(span / EXECUTION_CONTROLLER_MAX_STEP_DEG - 1e-9));
+		for (std::size_t piece = 1; piece < pieces; ++piece)
+		{
+			const double fraction = static_cast<double>(piece) / static_cast<double>(pieces);
+			std::vector<double> middle(path[index].size());
+			for (std::size_t joint = 0; joint < middle.size(); ++joint)
+				middle[joint] = path[index - 1][joint] +
+				                fraction * (path[index][joint] - path[index - 1][joint]);
+			divided.push_back(std::move(middle));
+		}
+		divided.push_back(path[index]);
+	}
+	path = std::move(divided);
 
 	std::size_t anchor = 0;
 	while (anchor + 1 < path.size())
@@ -923,6 +952,7 @@ std::unique_ptr<mtc::SerialContainer> buildPlaceBranch(
 /// bottle still attached; full-transfer keeps the historical transport/place
 /// tail and restores hand contact after detach.
 std::unique_ptr<mtc::SerialContainer> buildArmBranch(const Scenario& s, const ArmConfig& arm,
+                                                     const std::vector<std::string>& arm_joint_names,
                                                      const grabber_mtc::GraspCandidate& grasp,
                                                      const std::string& branch_id,
                                                      const mtc::solvers::PlannerInterfacePtr& straight,
@@ -1092,6 +1122,53 @@ std::unique_ptr<mtc::SerialContainer> buildArmBranch(const Scenario& s, const Ar
 
 	if (s.pick_only)
 	{
+		// End the pick where the arm has to end up anyway.  This move used to
+		// happen in a process started after the export had already been
+		// executed: reconnect the arm, start a planner, plan the same
+		// joint-space move, execute it.  Measured 2026-08-11, that was 15 s of
+		// the arm standing still holding a bottle for 2 s of motion -- and the
+		// operator sees a stop and a restart where there is one motion.
+		// Planned here it is part of the same solution, checked against the
+		// same scene with the bottle attached, and executed as one connected
+		// trajectory straight out of the retreat.
+		//
+		// The joint names come from the selected arm's planning group, never
+		// from a literal in here: which arm this is lives in the YAML.  A
+		// scenario without the joints simply skips this, which is what every
+		// scenario written before today gets.
+		if (arm_joint_names.size() == s.post_place_home_joints_deg.size() &&
+		    !s.post_place_home_joints_deg.empty())
+		{
+			std::map<std::string, double> home_goal;
+			for (std::size_t i = 0; i < s.post_place_home_joints_deg.size(); ++i)
+				home_goal.emplace(arm_joint_names[i],
+				                  s.post_place_home_joints_deg[i] * M_PI / 180.0);
+			// Same two siblings as the free-space leg, and for the same reason
+			// -- see connectAlternatives.  Handing this leg to the sampler
+			// alone is what made the 2026-08-11 lower-layer carry look wrong to
+			// the operator: 535 deg of joint travel for a 45 deg net move, J2
+			// walking 98 deg to finish 3.4 deg from where it started, J7 103
+			// deg to finish 3.1 deg away.  The separately planned tuck it
+			// replaced was a straight line -- every joint monotonic, detour
+			// ratio 1.0, 113 deg total.  A goal posture is not a route, so ask
+			// for the straight one and price both.
+			auto alternatives =
+			    std::make_unique<mtc::Alternatives>(p + "carry_to_grasp_start");
+			for (const auto& option :
+			     { std::make_pair(std::string("straight"), straight),
+			       std::make_pair(std::string("sampled"), sampling) })
+			{
+				auto stage = std::make_unique<mtc::stages::MoveTo>(
+				    p + "carry_to_grasp_start_" + option.first, option.second);
+				stage->setGroup(arm.planning_group);
+				stage->setGoal(home_goal);
+				if (!joint_weights.empty())
+					stage->setCostTerm(
+					    std::make_unique<mtc::cost::PathLength>(joint_weights));
+				alternatives->insert(std::move(stage));
+			}
+			branch->insert(std::move(alternatives));
+		}
 		*raw = branch.get();
 		return branch;
 	}
@@ -1283,9 +1360,16 @@ grabber_mtc::PickTrajectoryExport exportPickTrajectory(
 	for (const auto& sub : message.sub_trajectory)
 		if (!sub.trajectory.joint_trajectory.points.empty())
 			segments.push_back(&sub.trajectory.joint_trajectory);
-	if (segments.size() != 5)
-		throw std::runtime_error("pick-only export expected exactly five motion segments, got " +
-		                         std::to_string(segments.size()));
+	// Five, plus the carry back to the taught start when the scenario asked
+	// for one.  Stated as a number the scenario decides rather than a range:
+	// a sixth segment that appears without being asked for is a stage nobody
+	// audited, and this export is what the execution bridge trusts.
+	const std::size_t expected_segments =
+	    scenario.post_place_home_joints_deg.empty() ? 5 : 6;
+	if (segments.size() != expected_segments)
+		throw std::runtime_error("pick-only export expected exactly " +
+		                         std::to_string(expected_segments) +
+		                         " motion segments, got " + std::to_string(segments.size()));
 	constexpr std::size_t pregrasp_segments = 1;
 
 	grabber_mtc::PickTrajectoryExport out;
@@ -1372,6 +1456,13 @@ grabber_mtc::PickTrajectoryExport exportPickTrajectory(
 	append(*segments[pregrasp_segments + 3]);
 	if (out.points.size() == before_retreat)
 		throw std::runtime_error("pick-only lift/retreat segments contain no motion");
+	// The carry back to the taught start, when the scenario asked for one.  It
+	// stays inside "retreat" rather than becoming a phase of its own: the
+	// executed contract is "everything after the grasp is one connected
+	// motion", and that is exactly what this is -- the arm backing out of the
+	// shelf and continuing to where it started.
+	for (std::size_t extra = pregrasp_segments + 4; extra < segments.size(); ++extra)
+		append(*segments[extra]);
 	out.phases.push_back({ "retreat", attach, out.points.size() - 1 });
 	validateTrajectoryTiming(out.points, "pick-only");
 	return out;
@@ -1846,8 +1937,9 @@ int main(int argc, char** argv)
 				mtc::SerialContainer* raw = nullptr;
 				const std::string branch_id = arm->arm_id + "__" + candidate.id;
 				alternatives->insert(
-				    buildArmBranch(scenario, *arm, candidate, branch_id, straight, sampling,
-				                   local_motion, jointCostWeights(scenario, *model, *arm), &raw));
+				    buildArmBranch(scenario, *arm, activeJointNames(*model, *arm), candidate,
+				                   branch_id, straight, sampling, local_motion,
+				                   jointCostWeights(scenario, *model, *arm), &raw));
 				planned_branches.push_back({ &*arm, branch_id, candidate.id, raw });
 			}
 		}
@@ -1872,7 +1964,8 @@ int main(int argc, char** argv)
 			// with no guidance at all.  Same weights as the pick; the default
 			// table is per-scenario and already sized to this group.
 			alternatives->insert(buildArmBranch(
-			    scenario, *arm, scenario.source_grasp_candidates.front(), branch_id,
+			    scenario, *arm, activeJointNames(*model, *arm),
+			    scenario.source_grasp_candidates.front(), branch_id,
 			    straight, sampling, local_motion,
 			    jointCostWeights(scenario, *model, *arm), &raw));
 			planned_branches.push_back(
@@ -1888,9 +1981,9 @@ int main(int argc, char** argv)
 					continue;
 				mtc::SerialContainer* raw = nullptr;
 				alternatives->insert(
-				    buildArmBranch(scenario, arm, candidate, arm.arm_id, straight, sampling,
-				                   local_motion, jointCostWeights(scenario, *model, arm),
-				                   &raw));
+				    buildArmBranch(scenario, arm, activeJointNames(*model, arm), candidate,
+				                   arm.arm_id, straight, sampling, local_motion,
+				                   jointCostWeights(scenario, *model, arm), &raw));
 				planned_branches.push_back({ &arm, arm.arm_id, candidate.id, raw });
 			}
 			if (planned_branches.empty())

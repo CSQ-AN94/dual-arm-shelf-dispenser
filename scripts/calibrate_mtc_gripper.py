@@ -35,7 +35,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--expected-lift-mm",
         type=int,
-        help="可选复核值；省略时以 shelf_template 抓取初始高度为唯一来源",
+        help=(
+            "本轮抓取所在层的升降高度；省略时用 shelf_template 的抓取初始高度。"
+            "上层是它，下层是 250"
+        ),
     )
     parser.add_argument("--execute", action="store_true", required=True)
     cli = parser.parse_args(argv)
@@ -46,13 +49,16 @@ def main(argv: list[str] | None = None) -> int:
     expected_lift_mm = profile.grasp_start_lift_height_mm
     if expected_lift_mm is None:
         raise SafetyAbort("shelf_template 缺少抓取初始升降高度")
-    if (
-        cli.expected_lift_mm is not None
-        and cli.expected_lift_mm != expected_lift_mm
-    ):
-        raise SafetyAbort(
-            "--expected-lift-mm 与 shelf_template 抓取初始高度不一致"
-        )
+    # What this calibration needs is empty jaws at the taught arm pose, and
+    # that pose is joint angles -- the same tuck faces the lower layer at
+    # 250 mm and the upper one at 647.  Pinning the height to the profile's
+    # made a lower-layer pick refuse its own start six times in a row before
+    # anything moved.  The caller names the layer's height; it is still
+    # checked against the live lift, and still recorded in the evidence.
+    if cli.expected_lift_mm is not None:
+        if not 0 <= cli.expected_lift_mm <= 2600:
+            raise SafetyAbort("--expected-lift-mm 超出升降行程")
+        expected_lift_mm = cli.expected_lift_mm
     link7_to_flange, flange_to_tcp = (
         profile.tool_mount_calibration.require_transforms()
     )
@@ -96,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
             lift_height_mm=lift.height_mm,
             lift_mode=lift.mode,
             joint_tolerance_deg=DemoParams().planned_start_tolerance_deg,
+            expected_lift_height_mm=expected_lift_mm,
         )
         baseline = robot.calibrate_empty_close(DemoParams())
         opened = robot.gripper_state()

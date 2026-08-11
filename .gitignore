@@ -163,3 +163,6 @@ outputs/
 exports/*.zip
 .DS_Store
 .mujoco_assets/
+
+# Ultralytics scratch output
+runs/
