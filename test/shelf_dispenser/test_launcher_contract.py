@@ -106,7 +106,16 @@ def test_invalid_public_controls_fail_before_any_transport(
     assert not call_log.exists(), "invalid config must not reach rsync or ssh"
 
 
-def test_summary_and_operator_cancel_happen_before_any_transport(tmp_path):
+def test_summary_is_printed_before_any_transport(tmp_path):
+    """The run summary still precedes rsync/ssh, but nothing waits for a human.
+
+    There used to be a typed 开始 confirmation here, and cancelling was the
+    thing this asserted.  It was removed 2026-08-12 by operator instruction:
+    stdin at EOF counted as "any other input", so every non-interactive launch
+    cancelled itself.  What the summary must still do is print *before* the
+    launcher touches the robot, so a wrong config is visible in the scrollback
+    rather than only in the robot's behaviour.
+    """
     env, call_log = _fake_transport(tmp_path)
     env.update(
         {
@@ -116,13 +125,15 @@ def test_summary_and_operator_cancel_happen_before_any_transport(tmp_path):
         }
     )
 
-    result = _run_launcher(env, confirmation="取消")
+    result = _run_launcher(env)
 
-    assert result.returncode == 2
     assert "commissioning 速度上限: 7%" in result.stdout
     assert "MoveIt 轨迹执行: blocking" in result.stdout
     assert "预抓取视觉闭环: shadow" in result.stdout
-    assert not call_log.exists(), "cancelling before start must not transport code"
+    assert result.stdout.index("commissioning 速度上限") < result.stdout.index(
+        "同步当前 bottle task"
+    )
+    assert "输入：开始" not in result.stdout
 
 
 def test_unavailable_local_provenance_fails_before_any_transport(tmp_path):
@@ -160,7 +171,7 @@ def test_launcher_forwards_low_speed_blocking_shadow_and_stop_gate_without_hardw
     assert "预抓取视觉闭环: shadow" in result.stdout
     assert "阶段入口: stop-after-observation" in result.stdout
     assert result.stdout.index("MoveIt 轨迹执行") < result.stdout.index(
-        "视频已开始且急停就位后"
+        "同步当前 bottle task"
     )
 
     calls = call_log.read_text(encoding="utf-8")
