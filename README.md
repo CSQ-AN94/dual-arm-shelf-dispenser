@@ -1,137 +1,212 @@
-# dual-arm-shelf-dispenser
+<h1 align="center">Dual-Arm Shelf Dispenser</h1>
 
-Shelf picking and cross-layer placing on a dual Realman RM75 platform: a
-head-mounted RGB-D camera finds a bottle in a shelf bin, MoveIt Task Constructor
-plans the reach, the lift lowers the held bottle to another layer, and the arm
-places it in an observed empty slot.
+<p align="center">
+  <strong>面向双 RealMan RM75 平台的视觉货架抓取与跨层放置系统</strong><br>
+  RGB-D perception · MoveIt Task Constructor · safety-gated execution · real-hardware evidence
+</p>
 
-Carved out of the [Grabber](https://github.com/CSQ-AN94/Grabber) monorepo, which
-served this, a table-top grasp demo and a side-table delivery flow from one
-4950-line `demo.py` and one shared safety profile. Editing one broke another —
-the post-pick carry pose regression came straight from a validator forcing the
-shelf and table profiles to share a `home_joints_deg` taught three weeks earlier
-for a different task.
+<p align="center">
+  <img src="https://img.shields.io/badge/ROS_2-Humble-22314E?style=flat-square&logo=ros&logoColor=white" alt="ROS 2 Humble">
+  <img src="https://img.shields.io/badge/MoveIt_2-MTC-2F80ED?style=flat-square" alt="MoveIt 2 and MTC">
+  <img src="https://img.shields.io/badge/Python-3.10-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10">
+  <img src="https://img.shields.io/badge/C++-17-00599C?style=flat-square&logo=cplusplus&logoColor=white" alt="C++17">
+  <img src="https://img.shields.io/badge/Offline_Tests-675_passed-2EA44F?style=flat-square" alt="675 offline tests passed">
+  <img src="https://img.shields.io/badge/Platform-Real_Hardware-F2994A?style=flat-square" alt="Real hardware">
+</p>
 
-**Status: real hardware, partially working.** The first successful real shelf
-grasp landed 2026-08-03. Pick, the tucked carry and the lift all completed on
-2026-08-07; place has not. The honest per-stage picture is in `docs/`.
+本项目让双臂机器人从真实货架中识别指定饮料，规划并执行抓取，将持瓶机械臂随升降柱移动到另一层，再从新的 RGB-D 场景中寻找空位并完成放置。
 
-Bringing the left arm up to executing a grasp has its own writeup:
-[`docs/left_arm_bringup.md`](docs/left_arm_bringup.md). Everything it needs is
-already in place except one thing — its tool transform was mirrored from the
-right arm rather than measured, which is exactly what `execution_eligible:
-false` is recording.
+它不是“YOLO 输出一个坐标，机械臂直接走过去”的开环 Demo。系统把一次动作拆成**新鲜感知、只规划、独立审计、显式执行、反馈确认和证据交接**六个环节；每一阶段都重新读取真实硬件和场景状态，并把可审计的执行记录交给下一阶段。
 
-One problem gates the rest and has its own writeup:
-[`docs/rgbd_voxel_inflation.md`](docs/rgbd_voxel_inflation.md). The RGB-D
-obstacle voxels model the shelf up to 25 mm thicker than it is, so the planner
-refuses paths the arm has physically driven — measured, then disproved by
-replaying an operator's own hand-taught path on hardware. Half of it is fixed
-(the shelf panels were being modelled twice, once analytically and once as fat
-voxels); the remainder is what currently blocks place.
+> **当前阶段：真机研发中。** 右臂货架抓取、持瓶收拢和 `647 → 250 mm` 跨层升降已经在真实硬件上完成；自主放置尚未完成最终真机验收。左臂已经接入规划、碰撞场和安全围栏，但在工具链实测标定完成前保持执行锁定。
 
-## Hardware
+## 项目概览
 
 | | |
 |---|---|
-| Arms | 2 × Realman RM75 (7-DoF), `robotic-arm` pip SDK |
-| Gripper | 2 × RMG24, one per arm. Only the right one's tool chain has been measured, which is why `dual_rm75_arms.yaml` still carries `execution_eligible: false` for the left arm — its transform is mirrored from the right, not surveyed |
-| Depth | RealSense D435 (head) + wrist cameras |
-| Lift | serial column, 250–707 mm |
-| Compute | Jetson AGX Orin, ROS 2 Humble |
+| 机器人平台 | `2 × RealMan RM75` 七轴机械臂、`2 × RMG24` 夹爪、串口升降柱 |
+| 感知 | 头部 RealSense D435 + 双腕部深度相机，YOLO26s 六类饮料检测 |
+| 运动规划 | ROS 2 Humble、MoveIt 2、MoveIt Task Constructor、OMPL、Pilz |
+| 执行 | RealMan Python SDK，MTC 轨迹经过 Python 安全门禁后显式执行 |
+| 计算平台 | NVIDIA Jetson AGX Orin |
+| 当前能力 | 右臂上/下层抓取、持瓶回收拢位、跨层升降、空位感知与放置规划 |
 
-## Layout
+## 系统架构
 
-```
-shelf_dispenser/       the library
-    orchestrator.py    one run's hardware, scene and planning state
-    arm.py             one RealMan arm: connection, IK, motion primitives
-    arm_worker.py      the second arm, in its own process
-    safety.py          the electronic fence
-    left_arm.py        the fence, expressed in the left arm's base frame
-    ros/               entry points run by the system Python, by path
-mtc_ws/                ROS 2 workspace, MoveIt Task Constructor planner (C++)
-scripts/               one entry point per pipeline stage
-test/                  the suite; run `pytest -q` from the repo root,
-                       which includes mtc_ws's source-contract tests
-```
+![Dual-arm shelf dispenser architecture](docs/project_architecture.svg)
 
-Names describe what is behind the interface, not where the code came from.
-`ros/` is the realest seam in the repo — those modules never share an
-interpreter with their caller — and is named `ros` rather than `moveit` so it
-cannot shadow MoveIt's own package.
+系统刻意把 ROS/MoveIt 作为 **plan-only 子系统**：MoveIt 负责读取实时双臂与升降状态、构建碰撞场并导出候选轨迹，但不拥有真实机械臂控制器。轨迹返回 Python 后，还要通过电子围栏、稠密碰撞复核、关节约束、夹爪反馈和执行凭证检查，才会进入 RealMan SDK。
 
-`orchestrator.py` is 4950 lines and trips the god-module check in
-`scripts/architecture_report.py`. That is the next real piece of work: the
-perception cluster inside it is the most self-contained and would come out
-first.
+一轮完整跨层任务的主线是：
 
-## The pipeline
-
-Each stage re-samples its own inputs immediately before consuming them, and
-writes an execution record the next stage checks.
-
-```
-normalize_to_grasp_start.py    both arms + lift to the taught start pose
-calibrate_mtc_gripper.py       empty-close baseline, so "holding" is measurable
-capture_mtc_direct_pick_scene.py   head RGB-D → voxels + YOLO bottle
-plan_shelf_transfer (MTC)      approach, grasp, retreat
-execute_mtc_trajectory.py pick
-normalize_to_grasp_start.py --target carry_home   back to the start pose, holding
-execute_mtc_lift_transfer.py   647 → 250 mm with the bottle held
-capture_empty_shelf_places.py  find an empty slot on the lower layer
-plan_shelf_transfer (MTC)
-execute_mtc_trajectory.py place
+```text
+双臂与升降原子归位
+        ↓
+夹爪空夹基线标定
+        ↓
+头部 RGB-D + YOLO 目标定位 + 货架体素场
+        ↓
+MTC 只规划：接近 → 抓取 → 附着 → 退出
+        ↓
+Python 独立复核并执行右臂轨迹
+        ↓
+夹爪反馈确认持瓶 → 收臂 → 升降 647 → 250 mm
+        ↓
+重新采集下层空位与障碍物
+        ↓
+MTC 只规划：运输 → 斜向落座 → 释放 → 退出
+        ↓
+执行记录闭环
 ```
 
-## Safety
+## 工程亮点
 
-Nothing moves on a claim; every gate is checked against a live reading.
+| 设计 | 解决的问题 |
+|---|---|
+| **规划与执行物理隔离** | ROS 2 / MoveIt 子进程没有 controller manager，也不调用 `Task::execute()`；规划成功不等于允许运动。 |
+| **Fail-closed 执行契约** | `scenario.json/yaml`、`result.json`、`trajectory.json` 和 execution record 必须版本、场景、新鲜度与起点一致，缺一项即拒绝。 |
+| **每阶段重采样** | 抓取和放置分别使用消费前刚采集的 RGB-D 场景；升降、收臂或持瓶状态变化后不复用旧世界模型。 |
+| **双臂进程隔离** | RealMan SDK 的运动学 `Algo` 状态是进程全局的。每条臂由独立 worker 进程持有，避免第二个会话静默覆盖第一条臂的工具系和关节限制。 |
+| **统一但可追溯的安全围栏** | 围栏几何统一定义在右控制器基座系；左臂 TCP 通过实测 bridge 转换后复用同一套检查，并保留标定来源和证据 ID。 |
+| **示教提供先验，不绕过规划** | 122 个实测行位模板和放置示教用于选择 IK 分支、姿态与路径形状；实时目标点、碰撞场和最终执行资格仍由本轮感知与审计决定。 |
+| **反馈定义成功** | “抓住了”来自本轮空夹基线与 RMG24 位置反馈，而不是“已经发送 close 命令”；升降和双臂起点同样读取真实状态。 |
+| **真实失败可复现** | 运行过程保留场景、轨迹、规划结果、硬件快照和执行凭证，可离线回放碰撞、坐标系、体素和路径质量问题。 |
 
-- **Electronic fence** — every dense trajectory point's TCP must be inside the
-  workspace box and at least one allowed zone, and outside every keepout box.
-- **Collision recheck** — the plan is re-validated against the live MoveIt scene
-  after planning, not only during it.
-- **Joint-limit margin** — measured against the arm's own starting excess, so a
-  pose already outside the margin cannot deadlock every planner.
-- **Gripper feedback** — "holding" means a close position above the measured
-  empty-close baseline, not a commanded state.
-- **Left-arm drift** — the passive arm is captured live into every plan's
-  collision scene and required not to move during execution.
+### 安全链
 
-## Both arms
+- **Electronic fence**：稠密轨迹中每个 TCP 点都必须位于工作空间和允许区内，并避开所有 keepout box。
+- **Live collision recheck**：规划结果在执行前重新对齐实时双臂起点，并在当前 MoveIt scene 中逐点复核。
+- **Joint and controller audit**：检查关节软限位、起点误差、奇异性、单步跨度、压缩后指令预算和路径绕行。
+- **Passive-arm guard**：右臂任务期间，左臂的实时位置进入碰撞场；若左臂发生漂移，执行立即停止。
+- **Gripper and lift evidence**：抓取、收臂和升降分别产生记录，下一阶段不能仅凭调用方声明跳过前置条件。
 
-The RealMan SDK's `Algo` is process-global: install angle, tool frame and joint
-limits are set on the library, not on a handle, so a second `RobotSession` in
-one process silently overwrites the first one's kinematics. That is why the left
-arm was read-only for months.
+## 技术栈
 
-`shelf_dispenser/arm_worker.py` gives each arm its own process. A worker owns one
-`RobotSession` and answers newline-delimited JSON on stdin; the parent holds an
-`ArmProxy` exposing a whitelist of methods. The whitelist is the safety
-boundary, not a convenience — a typo cannot reach a method nobody vetted for the
-second arm.
+| 层 | 技术 | 用途 |
+|---|---|---|
+| 视觉感知 | Ultralytics YOLO26s、OpenCV、NumPy、SciPy | 六类商品检测、深度稳健估计、RGB-D 点云与空位候选 |
+| 世界模型 | RealSense、体素场、解析货架模型 | 目标/非目标分离、货架面扣除、悬空碎块过滤、动态碰撞物 |
+| 任务规划 | ROS 2 Humble、MoveIt 2、MoveIt Task Constructor | 双臂 current state、IK、抓取/放置 stage graph、附着物体语义 |
+| 路径规划 | OMPL、Pilz、CartesianPath、JointInterpolation | 采样规划、直线候选、笛卡尔接近与退出、示教路径约束 |
+| 机器人控制 | RealMan `robotic-arm` SDK、JSONL subprocess IPC | 关节运动、正逆解、夹爪反馈、双臂进程隔离 |
+| 设备集成 | 串口/TCP、ROS 2 joint-state bridge | 升降柱、头部姿态、实时双臂和升降状态发布 |
+| 验证 | pytest、MuJoCo、离线轨迹/场景回放 | 纯软件契约测试、几何与碰撞回归、真机失败复现 |
+| 工程化 | Python 3.10、C++17、YAML/JSON evidence | 分阶段 CLI、配置校验、可追溯运行产物 |
 
-`ros/plan_once.py` derives joint and link names from the planning group, so
-the same collision-aware planning path serves `left_arm` and `right_arm`. The
-controller bases use independently measured bridges into the same MoveIt frame
-(`safety_profiles.json`, `left_arm_model`); the older `config.yaml` camera
-calibration does not describe these controller-base frames. Fence geometry
-stays authored in the right controller base, and left-arm TCP points are
-converted into that frame before the same checks run.
+## 商品视觉模型
 
-## Running the tests
+系统当前使用六类饮料检测模型 `mixed_shelf_yolo26s_all101_corrected.pt`，商品身份统一为稳定的 `P01`–`P06` code，避免展示名称、别名和模型类别在任务链中混用。
+
+![YOLO26s beverage detection examples](reports/yolo26s_all101_corrected_detection_examples.png)
+
+在 101 张货架图、229 个目标上，按照**拍摄序列分组**进行五折验证，避免同一拍摄序列同时进入训练和验证：
+
+| Precision | Recall | mAP50 | mAP50–95 |
+|---:|---:|---:|---:|
+| 96.6% | 98.7% | 99.4% | 95.4% |
+
+五折未见图汇总中，229 个目标有 228 个正确定位并分类、1 个漏检、0 个错分类；独立的平台 Test 分区中 8 张图、20 个目标全部正确。完整结果和已知不足都保留在 [`reports/`](reports/) 中。
+
+> 这些数字是五折模型的未见图汇总，用于估计泛化能力；不是把最终全量模型在训练数据上重新计算得到的“漂亮分数”。
+
+## 真机进展
+
+截至 2026-08-12：
+
+| 能力 | 状态 | 证据边界 |
+|---|:---:|---|
+| 右臂上层货架抓取 | ✅ | 多个商品和行位真机成功；曾完成 3 个行位 `3/3` 首次尝试成功 |
+| 右臂下层货架抓取 | ✅ | `250 mm` 升降高度下已完成真实抓取和持瓶回收拢位 |
+| 持瓶收臂 | ✅ | 真机完成，执行前后均检查夹爪持瓶反馈 |
+| 跨层升降 `647 → 250 mm` | ✅ | 持瓶状态下真机完成，并产生 lift execution record |
+| 示教放置回放 | ✅ | 两次完整回放成功；它验证机械可达性，不等同于自主放置成功 |
+| 自主空位检测与放置规划 | 🚧 | 已走到完整放置 stage graph；最新场景过滤修复尚待一次真机复验 |
+| 完整自主跨层循环 | 🚧 | 抓取、收臂和升降已完成，最终放置尚未验收 |
+| 左臂 plan-only | ✅ | 规划组、实时状态、碰撞场、围栏和行位模板已经接通 |
+| 左臂抓取执行 | 🔒 | 工具变换目前由右臂镜像得到；实测标定前 `execution_eligible: false` |
+
+仓库把这种边界直接写进配置和产物，而不是只写在 README：尚未测量的标定带 `nominal_unvalidated` provenance，未开放的机械臂带明确的 `execution_block_reason`，没有执行资格的规划结果不能被 executor 接受。
+
+## 项目结构
+
+```text
+dual-arm-shelf-dispenser/
+├── shelf_dispenser/                 # Python 核心库
+│   ├── orchestrator.py              # 单轮硬件、场景与规划状态
+│   ├── arm.py / arm_worker.py       # RealMan 控制、轨迹审计、双臂进程隔离
+│   ├── safety.py                    # 电子围栏、标定来源与执行门禁
+│   ├── scene.py / perception.py     # RGB-D 世界模型与目标感知
+│   ├── mtc_pick_contract.py         # MTC 场景/结果/轨迹执行契约
+│   ├── mtc_execution.py             # 显式 pick/place 执行层
+│   └── ros/                         # 由系统 Python 独立运行的 ROS 2 入口
+├── mtc_ws/src/
+│   ├── grabber_mtc_planner/         # C++17 MoveIt Task Constructor planner
+│   └── grabber_robot_state_bridge/  # 双臂 + 升降实时只读状态桥
+├── scripts/                         # 每个流水线阶段一个可审计入口
+├── test/                            # 无机器人、无 ROS、无相机即可运行的测试
+├── docs/                            # 真机交接、故障分析与标定说明
+└── reports/                         # 视觉模型评估与示例
+```
+
+当前真实货架循环入口是 [`scripts/run_cross_layer_cycle.sh`](scripts/run_cross_layer_cycle.sh)，MTC 核心在 [`plan_shelf_transfer.cpp`](mtc_ws/src/grabber_mtc_planner/src/plan_shelf_transfer.cpp)，真实执行入口是 [`scripts/execute_mtc_trajectory.py`](scripts/execute_mtc_trajectory.py)。
+
+## 运行与测试
+
+### 离线测试
+
+测试不连接机器人、ROS 或相机：
 
 ```bash
-python -m pytest test/ -q
+python3 -m pytest test/ -q
+python3 scripts/architecture_report.py
 ```
 
-No robot, no ROS, no cameras required.
+当前主分支结果：
 
-## Provenance
+```text
+675 passed
+33 Python modules / no package import cycles
+```
 
-This is a portfolio and research repository, not a product. Where something is
-unverified it says so, including in the safety profiles' own `provenance`
-fields. Related: [realman-dual-arm-robot](https://github.com/CSQ-AN94/realman-dual-arm-robot)
-(SDK teaching material), [vision-guided-bottle-grasp](https://github.com/CSQ-AN94/vision-guided-bottle-grasp)
-(the single-bottle table demo this grew out of).
+### 真机入口
+
+机器人主机需要 Ubuntu 22.04、ROS 2 Humble、构建后的 `mtc_ws`、RealMan SDK、RealSense 和对应现场标定。完整上层抓取到下层放置入口为：
+
+```bash
+PRODUCT_CODE=P01 bash scripts/run_cross_layer_cycle.sh
+```
+
+这不是开箱即用命令。执行前必须确认代码同步、MTC workspace 已重新编译、现场 safety profile 与标定有效，并由操作者守在急停旁。建议先阅读 [`docs/RUNBOOK_20260808.md`](docs/RUNBOOK_20260808.md)。
+
+## 设计演进
+
+这个项目最初位于 [Grabber](https://github.com/CSQ-AN94/Grabber) monorepo 中：货架抓取、桌面抓取和侧桌投放共享一个约 4,950 行的 `demo.py` 与一套 safety profile。一个流程的示教 home 被另一个流程复用后，直接造成持瓶收臂回归。
+
+拆分后的原则是：
+
+- 货架任务拥有自己的领域词汇、标定来源和安全 profile；
+- 一个流水线阶段对应一个清晰入口和一份可交接证据；
+- ROS 2、MoveIt、真实硬件 SDK 和离线工具之间通过文件/进程边界通信；
+- 未验证能力保持关闭，而不是用默认值“先跑起来”。
+
+## Roadmap
+
+1. 在真实硬件上复验最新 place scene 过滤修复，完成首个自主跨层闭环。
+2. 实测左臂工具链，更新 provenance，并开放左臂低速抓取验证。
+3. 将 `orchestrator.py` 中相对独立的 perception cluster 抽出，继续缩小单模块职责。
+
+## 深入阅读
+
+- [`docs/left_arm_bringup.md`](docs/left_arm_bringup.md)：左臂从 plan-only 到允许执行所需的完整证据链。
+- [`docs/rgbd_voxel_inflation.md`](docs/rgbd_voxel_inflation.md)：真实 RGB-D 体素“虚胖”如何制造假碰撞，以及如何用真机示教轨迹证伪。
+- [`docs/HANDOVER_20260808.md`](docs/HANDOVER_20260808.md)：2026-08-07 实验后的自包含交接快照。
+- [`docs/side_table_delivery_reopening.md`](docs/side_table_delivery_reopening.md)：侧桌投放为何由 profile 保持关闭，以及重开仍缺哪些现场量测。
+
+## 项目定位
+
+这是一个**作品集与研究型机器人项目**，重点展示真实硬件上的感知—规划—执行闭环、安全边界、故障复现和工程决策；它不是可直接部署到其他机器人或货架上的产品包。所有未验证能力都应继续保持 fail-closed。
+
+相关仓库：
+
+- [realman-dual-arm-robot](https://github.com/CSQ-AN94/realman-dual-arm-robot)：双臂平台、硬件操作与 SDK 教学材料。
+- [vision-guided-bottle-grasp](https://github.com/CSQ-AN94/vision-guided-bottle-grasp)：本项目演进自的桌面单瓶视觉抓取验证。
