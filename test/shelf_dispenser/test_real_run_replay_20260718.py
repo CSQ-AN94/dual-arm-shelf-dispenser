@@ -138,7 +138,7 @@ def test_independent_head_measurement_never_synthesizes_prior_depth(monkeypatch)
     clock = iter((0.0, 1.0, 11.0))
     monkeypatch.setattr("shelf_dispenser.orchestrator.time.time", lambda: next(clock))
 
-    with pytest.raises(SafetyAbort, match="检测/深度稳定帧不足: 0/3"):
+    with pytest.raises(SafetyAbort, match="检测/深度稳定帧不足: 0/3") as caught:
         demo.localize(
             "独立头部三维确认",
             lambda: np.eye(4),
@@ -146,6 +146,95 @@ def test_independent_head_measurement_never_synthesizes_prior_depth(monkeypatch)
             depth_prior_base=np.array([0.0, 0.0, 0.5]),
             allow_depth_prior_fallback=False,
         )
+    assert not isinstance(caught.value, BottleDetectionLost)
+
+
+def test_zero_detector_hits_is_a_typed_empty_view(monkeypatch):
+    """Layer search may move only for a real detector miss, not bad depth."""
+    demo = RunOrchestrator.__new__(RunOrchestrator)
+    demo.params = DemoParams(samples=3)
+    demo.stop_event = threading.Event()
+    demo.camera_name = "head"
+    demo.state = SimpleNamespace(update=lambda **_: None)
+    demo.stage = lambda *_: None
+
+    class Camera:
+        @staticmethod
+        def get_camera_intrinsics():
+            return np.eye(3), None
+
+        timestamps = iter((1.0, 2.0, 3.0))
+
+        @classmethod
+        def get_frame_timestamp(cls):
+            return next(cls.timestamps)
+
+        @staticmethod
+        def get_latest_frames():
+            return np.zeros((2, 2, 3)), np.ones((2, 2))
+
+    class Detector:
+        @staticmethod
+        def detect(*_args, **_kwargs):
+            return None
+
+    demo.camera = Camera()
+    demo.detector = Detector()
+    demo.wrist_detector = None
+    demo._target_classes = lambda: {"p01"}
+    clock = iter((0.0, 1.0, 2.0, 11.0))
+    monkeypatch.setattr(
+        "shelf_dispenser.orchestrator.time.time", lambda: next(clock)
+    )
+    monkeypatch.setattr("shelf_dispenser.orchestrator.time.sleep", lambda _: None)
+
+    with pytest.raises(BottleDetectionLost, match="未检测到目标商品"):
+        demo.localize("头部粗定位", lambda: np.eye(4), demo.params)
+
+
+def test_a_dead_camera_is_never_reported_as_an_empty_shelf(monkeypatch):
+    """A camera that delivers nothing must not buy a layer change.
+
+    Both a dead camera and an empty shelf end the sampling loop with zero
+    detector hits.  The layer-search runner turns BottleDetectionLost into
+    "this shelf is empty, move the lift and look elsewhere", so a camera
+    outage typed as that sends the operator to the wrong place -- and moves
+    the platform for nothing on the way.
+    """
+    demo = RunOrchestrator.__new__(RunOrchestrator)
+    demo.params = DemoParams(samples=3)
+    demo.stop_event = threading.Event()
+    demo.camera_name = "head"
+    demo.state = SimpleNamespace(update=lambda **_: None)
+    demo.stage = lambda *_: None
+
+    class DeadCamera:
+        @staticmethod
+        def get_camera_intrinsics():
+            return np.eye(3), None
+
+        timestamps = iter((1.0, 2.0, 3.0))
+
+        @classmethod
+        def get_frame_timestamp(cls):
+            return next(cls.timestamps)
+
+        @staticmethod
+        def get_latest_frames():
+            return None, None
+
+    demo.camera = DeadCamera()
+    demo.detector = SimpleNamespace(detect=lambda *_a, **_k: None)
+    demo.wrist_detector = None
+    demo._target_classes = lambda: {"p01"}
+    clock = iter((0.0, 1.0, 2.0, 11.0))
+    monkeypatch.setattr(
+        "shelf_dispenser.orchestrator.time.time", lambda: next(clock)
+    )
+    monkeypatch.setattr("shelf_dispenser.orchestrator.time.sleep", lambda _: None)
+
+    with pytest.raises(CameraFrameUnavailable, match="未提供任何可用帧"):
+        demo.localize("头部粗定位", lambda: np.eye(4), demo.params)
 
 
 def test_post_lift_recorded_wrist_outage_never_uses_head_fallback():

@@ -46,7 +46,7 @@ def stop_reason(stop_event) -> str:
 @dataclass
 class DemoParams:
     samples: int = 7
-    confidence: float = 0.35
+    confidence: float = 0.52
     min_depth_m: float = 0.12
     max_depth_m: float = 0.65
     max_depth_mad_m: float = 0.018
@@ -241,6 +241,25 @@ class DemoParams:
     visual_servo_convergence_m: float = 0.004
     visual_servo_divergence_tolerance_m: float = 0.002
     visual_servo_max_position_spread_m: float = 0.012
+
+    # Table placement closes its loop on the *measured* TCP-to-bottle-bottom
+    # offset, not on the catalog half-height: the tool mount chain is nominal
+    # (its own evidence_id forbids transferring it to a geometric grasp-point
+    # derivation) and the shelf absorbs that error in grasp_stop_short_m,
+    # which is tuned for a horizontal approach and does not apply top-down.
+    # The measurement only works while the bottle is clearly separated from
+    # the table -- closer than place_servo_min_separation_m the two merge in
+    # the head point cloud -- so the loop refines the offset during descent
+    # and commits the final segment with the converged value.
+    place_servo_standoff_m: float = 0.060
+    place_servo_min_separation_m: float = 0.025
+    place_servo_release_gap_m: float = 0.006
+    place_servo_max_step_m: float = 0.012
+    place_servo_max_total_m: float = 0.120
+    place_servo_max_corrections: int = 8
+    place_servo_min_bottle_points: int = 25
+    place_servo_offset_tolerance_m: float = 0.004
+    place_servo_offset_disagreement_m: float = 0.035
     # Lift/release confirmation is already conditioned on a completed robot
     # action and then checked again for the expected motion direction.  With
     # three fresh fixed-head frames, require a strict 2/3 majority so one

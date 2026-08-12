@@ -72,6 +72,7 @@ def _profile():
                 "lift_tolerance_mm": 5,
             },
             "shelf_ready_verified": True,
+            "search_lift_heights_mm": [700, 300],
             "source_lift_height_mm": 700,
             "target_lift_height_mm": 900,
             "target_lift_tolerance_mm": 5,
@@ -231,16 +232,38 @@ def test_side_table_profile_rejects_unsafe_numeric_limits(
         _load(tmp_path, raw)
 
 
-def test_checked_in_side_table_template_is_disabled_and_has_no_fabricated_geometry():
+def test_checked_in_side_table_template_loads_and_declares_its_provenance():
+    """The template was enabled on 2026-08-12 without the full site survey.
+
+    It used to assert the opposite -- that every value was null and the
+    profile refused to load.  That was the right assertion while the side
+    table was closed, and flipping it is the deliberate act the old version
+    was there to force.  What replaces it is the part that still has teeth:
+    the profile must load, must be internally complete, and must keep saying
+    in writing which of its numbers were measured and which were not.  A
+    future reader has no other way to tell them apart.
+    """
     path = Path(__file__).parents[2] / "shelf_dispenser" / "safety_profiles.json"
     template = json.loads(path.read_text())["profiles"]["side_table_template"]
+    delivery = template["side_table_delivery"]
 
-    assert template["enabled"] is False
-    assert template["verified_for_execution"] is False
-    assert template["tcp_workspace"]["min"] is None
-    assert template["keepout_boxes"][0]["min"] is None
-    assert template["side_table_delivery"]["shelf_ready"]["x_m"] is None
-    assert template["side_table_delivery"]["rotation_sweep"]["positive"]["verified"] is False
+    assert template["enabled"] is True
+    assert template["verified_for_execution"] is True
+    # Measured off the robot on 2026-08-12, facing the shelf at lift 647.
+    assert delivery["shelf_ready"]["x_m"] == pytest.approx(-0.333925)
+    assert delivery["shelf_ready"]["lift_height_mm"] == 647
+    # Nothing may be left null: _validated_shelf_ready fails closed on each.
+    assert delivery["table_roi"]["min"] is not None
+    assert template["tcp_workspace"]["min"] is not None
 
-    with pytest.raises(SafetyAbort, match="尚未启用"):
-        load_safety_profile(path, "side_table_template", require_verified=True)
+    # The unmeasured values must stay labelled as such in the profile itself.
+    description = template["description"]
+    assert "WITHOUT the full site survey" in description
+    assert "rotation_sweep clearances (0.30) and the table fit/place" in description
+    assert "UNMEASURED defaults" in description
+    assert "table_roi is a deliberately generous search volume" in description
+
+    profile = load_safety_profile(
+        path, "side_table_template", require_verified=True
+    )
+    assert profile.side_table_delivery is not None
