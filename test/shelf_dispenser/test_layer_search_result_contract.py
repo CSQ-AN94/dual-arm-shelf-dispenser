@@ -60,3 +60,32 @@ def test_both_sides_still_agree_on_the_marker():
     assert 'RESULT_MARKER = "SHELF_LAYER_LIFT_MM="' in searcher
     assert 'print(f"{RESULT_MARKER}{height}", flush=True)' in searcher
     assert "SHELF_LAYER_LIFT_MM=" in launcher
+
+
+def test_a_stray_detection_frame_means_not_this_layer_not_a_fault():
+    """One false-positive frame must not abort the whole layer search.
+
+    2026-08-12: P04 was on the lower layer.  The detector produced a single
+    spurious frame on the upper one, the 1/7 result was classified as a fault,
+    and the search stopped without ever looking below.  The classifier keyed on
+    "were there zero detector hits", which any non-zero false-positive rate
+    defeats.  The floor that matters is the consensus test's own: below it no
+    outcome could have been a confident detection.
+    """
+    import shelf_dispenser.orchestrator as orch
+
+    assert orch.MINIMUM_CONSENSUS_FRAMES == 3
+    source = Path(orch.__file__).read_text(encoding="utf-8")
+    branch = source[source.index("检测到目标但稳定帧不足以确认")
+                    - 1200: source.index("检测/深度稳定帧不足")]
+    # Below the floor: BottleDetectionLost, which the layer runner catches and
+    # turns into "try the next height".
+    assert "if 0 < len(camera_points) < MINIMUM_CONSENSUS_FRAMES:" in branch
+    # Zero usable points with a detector hit stays a fault: the detector saw
+    # the product and depth produced nothing, which is the depth path
+    # failing rather than an empty layer.
+    assert "BottleDetectionLost" in branch
+    # At or above it the fault classification stays, so a layer that really
+    # holds the target is never silently skipped.
+    assert "raise SafetyAbort" in source[source.index("检测/深度稳定帧不足") - 200:
+                                         source.index("检测/深度稳定帧不足") + 200]

@@ -99,6 +99,9 @@ LOG = logging.getLogger("bottle_demo")
 # How long a taught-pose move may take to settle before its arrival error is
 # judged.  Bounded so an arm that never arrives still fails.
 ARRIVAL_SETTLE_TIMEOUT_S = 2.0
+# Fewer agreeing points than this can never satisfy the consensus test, so a
+# result below it is not a weak detection -- it is no detection.
+MINIMUM_CONSENSUS_FRAMES = 3
 
 
 class RunOrchestrator:
@@ -1061,6 +1064,32 @@ class RunOrchestrator:
                     f"0/{depth_params.samples} 个有效检测帧"
                     f"（相机送到 {frames_seen} 帧）"
                 )
+            # How many usable points is "saw nothing" rather than "something is
+            # wrong"?  The consensus test below cannot succeed on fewer than
+            # MINIMUM_CONSENSUS_FRAMES, so anything under that could never have
+            # become a confident detection no matter what happened next -- it is
+            # a stray frame, and for a layer search that means "not on this
+            # layer", not "the camera is broken".
+            #
+            # 2026-08-12: this branch keyed on detector_hits == 0 alone, so a
+            # single false-positive frame on a layer that genuinely did not hold
+            # the product (1/7) was classified as a fault and aborted the entire
+            # search before it looked at the layer below, where the bottle was.
+            # With any non-zero false-positive rate that repeats forever.
+            #
+            # Both edges stay faults.  At or above the floor, enough frames
+            # agreed that something is there and failing to pin it down is worth
+            # stopping for rather than skipping a layer that holds the target.
+            # At exactly zero usable points with a detector hit, the detector
+            # saw the product and depth produced nothing for any of those
+            # frames -- that is the depth path failing, not an empty shelf, and
+            # a 2026-07-18 replay pins it.
+            if 0 < len(camera_points) < MINIMUM_CONSENSUS_FRAMES:
+                raise BottleDetectionLost(
+                    "检测到目标但稳定帧不足以确认: "
+                    f"{len(camera_points)}/{depth_params.samples}"
+                    f"（低于共识下限 {MINIMUM_CONSENSUS_FRAMES}，按「未确认到」处理）"
+                )
             raise SafetyAbort(
                 f"检测/深度稳定帧不足: {len(camera_points)}/{depth_params.samples}"
             )
@@ -1070,7 +1099,7 @@ class RunOrchestrator:
         support_counts = np.count_nonzero(support, axis=1)
         seed = int(np.argmax(support_counts))
         if required_consensus_frames is None:
-            required = max(3, int(np.ceil(0.70 * len(base))))
+            required = max(MINIMUM_CONSENSUS_FRAMES, int(np.ceil(0.70 * len(base))))
         else:
             required = int(required_consensus_frames)
             if not (2 <= required <= len(base)):
