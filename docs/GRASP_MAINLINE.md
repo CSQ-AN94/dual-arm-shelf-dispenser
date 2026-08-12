@@ -56,9 +56,17 @@ PRODUCT_CODE=P01 LAYER=upper PICK_ONLY=1 bash scripts/run_cross_layer_cycle.sh
 而货架抓取本不该依赖投放 profile——接的时候要么把高度表搬到 `shelf_template`，
 要么显式说明这个依赖。
 
-**另一个已知 bug（未修）**：判定"这层有没有"只看检测命中数是不是 0，
-所以**一帧误检就会把"这层没有"变成"故障"并中止整个搜索**
-（2026-08-12 实测 `1/7` 中止，见 `docs/why_the_place_failed_20260812.md` §2.1）。
+**"几中几"已定（2026-08-12 修）**：判据原本只看检测命中数是不是 0，
+所以一帧误检（`1/7`）就被判成故障、整个搜索中止。现在按共识下限 `3` 切三段：
+
+| 可用三维点 | 判定 | 理由 |
+|---|---|---|
+| `0` 且检测命中 > 0 | **故障** | 检测到了但深度一帧都没产出 —— 深度坏了，不是货架空（2026-07-18 真实运行 pin 住） |
+| `1 ~ 2` | **这层没有** | 低于共识下限，无论如何都不可能确认成功，属于杂散帧 |
+| `3 ~ 6` | **故障** | 足够多的帧认同有东西却定不下来，值得停下来看，而不是悄悄跳过一个有货的层 |
+| `7 / 7` | 通过 | 实测成功的两次都是 7/7，散布 1.8~3.1 mm |
+
+分界 `3` 不是拍的：共识判据自己的下限就写着 `max(3, ceil(0.70·N))`。
 
 ### 2.2 数据库 —— 写好了，零调用者
 
@@ -90,20 +98,75 @@ record_pick(inv, "B2")
 人随手挪一瓶它就错了。所以 `find()` 强制要求调用方给 `max_age_s`，
 而且**命中之后没找到必须能退回去重新扫**，不能直接失败。
 
-## 3. 不是主线的东西
+## 3. 已废弃的管线：`run_task.sh`
+
+**它现在跑不起来了**（2026-08-12）。直接运行会拒绝并指向主线：
+
+```
+拒绝: 这条抓取管线已于 2026-08-12 废弃，不要运行。
+  货架抓取请用主线：
+    PRODUCT_CODE=P01 LAYER=upper PICK_ONLY=1 bash scripts/run_cross_layer_cycle.sh
+```
+
+做迁移时才用 `I_KNOW_THIS_PIPELINE_IS_RETIRED=1` 显式绕过。
+
+**它是什么**：table_demo 时代的管线，头部粗定位 → **右腕观察位** → 右腕精定位 →
+抓取 → 放置。2026-08-12 四次尝试全部没走到抓取，其中两次直接死于它自己的遗产
+（228° 的 table_demo 停放位姿、34 个右腕观察位候选全淘汰），
+同期主线真机抓取 4 次 3 成。
+
+**停用它没有丢掉任何已验证的能力** —— 侧桌投放曾经只活在这条上，但它一次都没成功过。
+
+### 3.1 侧桌投放怎么迁到主线（比看起来容易）
+
+清点过了，**桌面观测的能力不在旧 orchestrator 里**：
+
+| 需要的东西 | 在哪 | 状态 |
+|---|---|---|
+| 桌面拟合 + 候选点 | `shelf_dispenser/delivery_table.py`（库） | ✅ 现成，而且**主线的 `capture_empty_shelf_places.py` 已经在用它** |
+| 采集空位 → 放置记录 | `scripts/capture_empty_shelf_places.py` | ✅ 主线脚本 |
+| 记录 → MTC place 场景 | `scripts/empty_shelf_places_to_mtc_scenario.py` | ✅ 主线脚本 |
+| MTC place 规划 + 执行 | `plan_shelf_transfer` place 段 / `execute_mtc_trajectory.py place` | ✅ 现成 |
+| 底盘转身 | `shelf_dispenser/mobile_body.py` | ✅ 库，但**从未真机执行** |
+| 落桌视觉伺服 | `orchestrator._servo_bottle_onto_table` | ⚠️ **只在旧 orchestrator 里**，要搬出来 |
+
+**所以迁移 = 主线的 pick 之后，把 ROI 从「下层货架空位」换成「桌面」，中间插一段底盘转身。**
+真正要搬的只有落桌伺服那一段。
+
+**顺序**：
+1. 先在**不转身**的情况下打通"MTC place 到桌面"（把桌子摆在机器人正前方够得到的地方），
+   这样底盘旋转和放置两个未验证项不会同时上场
+2. 通了再加转身，且**先空手单独验一次旋转**
+
+## 3.2 一层四个点位：视觉先验（你提的，成立）
+
+槽位不是新概念，`inventory.py` 里已经按 122 个示教点推出来了：每层 600 mm 切四格，
+`A1–A4` / `B1–B4`，每格能被哪条臂够到直接读 `eligible_arms`。
+而示教的那 8 条放置路径正好是每层 4 个点位。
+
+**所以视觉不必从零找位置**：检测到目标之后，
+`inventory.slot_for_row_position(layer, row_m)` 就能说出它在哪一格，
+而那一格的示教点给出这一格的大致位姿和可达臂。这既是库存要记的"位置"，
+也是给规划的先验。
+
+**接线要注意**：行位映射必须复用
+`apply_demonstrated_grasp_to_scenario.select_row_candidate`（按示教点的 MoveIt X
+找最近行位），**不能自己再算一遍**——这个仓库已经在"第二份副本"上栽过两次。
+
+## 3.3 其余不是主线的东西
 
 | 路径 | 是什么 | 怎么处置 |
 |---|---|---|
-| `run_task.sh` → `run_pick_place_task.py` | table_demo 时代的旧管线：头部粗定位 → **右腕观察位** → 右腕精定位 → 抓取 → 放置 | **不要在它上面加抓取相关的东西。** 但它目前是**侧桌投放（转身放桌上）的唯一实现**，所以不能删；侧桌投放要做的是改用主线的抓取，而不是继续补它 |
-| `replay_demonstrated_trajectory.py` | 示教轨迹回放，真机验证过 4 次 | 保留，作为规划不出来时的兜底手段 |
+| `replay_demonstrated_trajectory.py` | 示教轨迹回放，真机验证过 4 次 | 保留，规划不出来时的兜底 |
 | 各种 `mujoco_*.py`、标定、测量、诊断脚本 | 独立工具 | 保留，人工调用 |
 
 **2026-08-12 已删除**（"旧的失败的"，它们自己的文档字符串就承认了）：
 
-- `demonstrated_cross_layer_cycle.py` —— *"Fourteen consecutive autonomous attempts have failed"*，自主抓取跑不通时的示教兜底
+- `demonstrated_cross_layer_cycle.py` —— *"Fourteen consecutive autonomous attempts have failed"*
 - `continue_manual_grasp.py` —— 从人手放进夹爪的抓取继续
 - `diagnose_left_arm_kinematics.py` —— 左臂运动学一次性诊断，那个 bug 已修
-- `run_task_autonomous.sh` / `run_task_resume.sh` / `start_task.sh` —— 三个只打印"已停用"然后 `exit 2` 的空壳，而且每次跑任务都在被 rsync 到机器人
+- `run_task_autonomous.sh` / `run_task_resume.sh` / `start_task.sh` —— 三个 `exit 2` 的空壳，
+  而且每次跑任务都在被 rsync 到机器人
 
 ## 4. 一句话
 
