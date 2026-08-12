@@ -52,7 +52,7 @@ def test_cycle_owns_and_cleans_up_its_plan_only_move_group():
     subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
 
 
-def test_lower_layer_pick_descends_before_it_looks_and_stops_after_the_tuck():
+def test_lower_layer_pick_descends_before_planning_and_stops_after_the_tuck():
     """LAYER=lower is the same pick 397 mm down, and it cannot go on to place.
 
     The lift moves before the plan-only stack starts, so the bridge publishes
@@ -61,11 +61,12 @@ def test_lower_layer_pick_descends_before_it_looks_and_stops_after_the_tuck():
     that combination is refused rather than left to fail three stages later.
     """
     source = SCRIPT.read_text(encoding="utf-8")
-    assert "LAYER=${LAYER:-upper}" in source
+    assert "LAYER=${LAYER:-}" in source
+    assert '[ "$PICK_ONLY" = 1 ] && LAYER=auto || LAYER=upper' in source
     assert "PICK_ONLY=${PICK_ONLY:-0}" in source
     assert "upper) PICK_LIFT_MM=647 ;;" in source
     assert "lower) PICK_LIFT_MM=250 ;;" in source
-    descend = source.index('say "阶段 1.5')
+    descend = source.index('move_empty_platform_to_layer lower')
     assert source.index("normalize_to_grasp_start.py --execute") < descend
     assert descend < source.index("start_stack pick")
     # Every gate that asks "is the lift where this pick starts?" has to be
@@ -75,6 +76,21 @@ def test_lower_layer_pick_descends_before_it_looks_and_stops_after_the_tuck():
     assert '--expected-lift-mm "$PICK_LIFT_MM"' in source
     assert source.index("PICK_ONLY_SUCCESS") > source.index('say "阶段 2.5')
     assert source.index("PICK_ONLY_SUCCESS") < source.index("start_stack place")
+
+
+def test_auto_layer_search_moves_only_on_typed_no_target():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert 'auto) PICK_LIFT_MM= ;;' in source
+    assert 'for CANDIDATE_LAYER in upper lower' in source
+    assert 'move_empty_platform_to_layer "$CANDIDATE_LAYER"' in source
+    assert 'if [ "$SEARCH_STATUS" = 3 ]' in source
+    assert 'SELECTED_LAYER=$CANDIDATE_LAYER' in source
+    assert source.index('for CANDIDATE_LAYER in upper lower') < source.index(
+        "start_stack pick"
+    )
+    # Lower-source delivery to the side table is still unmeasured. Search may
+    # find it, but must not pick it unless the caller explicitly asked to hold.
+    assert '拒绝抓起一个没有安全去处的瓶子' in source
 
 
 def test_robot_drift_tracks_the_left_arm_safety_chain():

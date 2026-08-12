@@ -99,6 +99,10 @@ TRACKED = [
     # the chassis actually runs; a matching hash here means the source agrees,
     # not that the robot was rebuilt.
     "scripts/woosh_rotate_relative.cpp",
+    "scripts/find_product_shelf_layer.py",
+    "scripts/run_task.sh",
+    "scripts/run_pick_place_task.py",
+    "scripts/side_table_profile_status.py",
     "outputs/row_templates.json",
     "sensors/camera_thread.py",
     "shelf_dispenser/camera_access.py",
@@ -151,10 +155,12 @@ def remote_digests(host: str, remote: str) -> dict[str, str]:
         raise SystemExit(f"连不上机器人: {result.stderr.strip()}")
     out = {}
     for line in result.stdout.splitlines():
-        if ": No such file" in line or "无法" in line:
-            missing = line.split(":")[0].split("/")[-1]
-            out[missing] = "缺失"
-            continue
+        # Only "<hash> <path>" lines count.  sha256sum's error for a missing
+        # file never has that shape in any locale, so an absent key *is* the
+        # missing signal -- the caller reads it as such.  The branch that used
+        # to parse those errors keyed them off "sha256sum:" rather than the
+        # path, so a missing file always fell through and got reported as
+        # "内容不同" instead of "机器人上没有".
         parts = line.split()
         if len(parts) == 2:
             out[parts[1][len(remote) + 1 :]] = parts[0]
@@ -188,9 +194,7 @@ def main() -> int:
     print(f"✗ {len(drift)}/{len(TRACKED)} 个文件不一致：")
     for rel in drift:
         state = (
-            "机器人上没有"
-            if remote_hashes.get(rel) == "缺失"
-            else "内容不同"
+            "机器人上没有" if remote_hashes.get(rel) is None else "内容不同"
         )
         print(f"    {rel:52s} {state}")
     if not cli.push:

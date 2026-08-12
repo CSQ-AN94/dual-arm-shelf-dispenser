@@ -11,6 +11,7 @@
 #
 # 用法（在机器人上）：
 #   PRODUCT_CODE=P01 bash scripts/run_cross_layer_cycle.sh
+#   PRODUCT_CODE=P01 PICK_ONLY=1 bash scripts/run_cross_layer_cycle.sh
 #
 # 跑之前先在 Mac 上确认机器人跑的是同一份代码：
 #   python scripts/robot_code_drift.py --push
@@ -23,24 +24,32 @@ O=${CYCLE_OUT:-/home/rm/cycle}
 SPEED=${CYCLE_SPEED:-100}
 ROW_TEMPLATES=${ROW_TEMPLATES:-$G/outputs/row_templates.json}
 PRODUCT_CODE=${PRODUCT_CODE:-}
-# Which shelf layer to pick from.  The lift carries the whole torso, so the
-# lower layer is the same arm configuration and the same head view 397 mm down:
-# LAYER=lower homes at 647 as always, then descends before it looks.
-LAYER=${LAYER:-upper}
 # Stop after the arm is back on the taught tuck pose, holding the bottle.  For
 # runs where a person takes the bottle off and resets the shelf between picks.
 PICK_ONLY=${PICK_ONLY:-0}
+# A pick-only run is the safe autonomous-search entry: there is no destination
+# assumption to make after a lower-layer find. The established upper->lower
+# placement cycle keeps its upper default. LAYER=upper/lower/auto overrides it.
+LAYER=${LAYER:-}
+if [ -z "$LAYER" ]; then
+  [ "$PICK_ONLY" = 1 ] && LAYER=auto || LAYER=upper
+fi
 
 case "$PRODUCT_CODE" in
   P01|P02|P03|P04|P05|P06) ;;
   *) echo "拒绝: 必须用 PRODUCT_CODE=P01..P06 指明当前瓶型" >&2; exit 1 ;;
 esac
+case "$PICK_ONLY" in
+  0|1) ;;
+  *) echo "拒绝: PICK_ONLY 必须是 0 或 1" >&2; exit 1 ;;
+esac
 case "$LAYER" in
   upper) PICK_LIFT_MM=647 ;;
   lower) PICK_LIFT_MM=250 ;;
-  *) echo "拒绝: LAYER 必须是 upper 或 lower" >&2; exit 1 ;;
+  auto) PICK_LIFT_MM= ;;
+  *) echo "拒绝: LAYER 必须是 auto、upper 或 lower" >&2; exit 1 ;;
 esac
-[ "$PICK_ONLY" = 1 ] || [ "$LAYER" = upper ] || {
+[ "$PICK_ONLY" = 1 ] || [ "$LAYER" != lower ] || {
   echo "拒绝: 下层抓取之后没有更低的层可放，LAYER=lower 只支持 PICK_ONLY=1" >&2
   exit 1
 }
@@ -130,6 +139,32 @@ start_stack(){
   echo "  OK"
 }
 
+move_empty_platform_to_layer(){
+  TARGET_LAYER=$1
+  case "$TARGET_LAYER" in
+    upper) TARGET_LIFT_MM=647 ;;
+    lower) TARGET_LIFT_MM=250 ;;
+    *) echo "拒绝: 未知搜索层 $TARGET_LAYER" >&2; exit 1 ;;
+  esac
+  say "层间搜索  空手升降到 $TARGET_LAYER 层（$TARGET_LIFT_MM mm）"
+  cd "$G"
+  if $PY -c "
+import sys; sys.path.insert(0, '.')
+from shelf_dispenser.mobile_body import LiftSocketAdapter
+from utils.config import load_config
+cfg = load_config('config.yaml')
+lift = LiftSocketAdapter(cfg.connections.left_arm_ip, cfg.connections.arm_port)
+before = lift.state()
+after = before if abs(int(before.height_mm) - $TARGET_LIFT_MM) <= 5 else lift.move_to($TARGET_LIFT_MM, speed=30)
+print(after)
+sys.exit(0 if abs(int(after.height_mm) - $TARGET_LIFT_MM) <= 5 else 1)
+" > "$O/lift_search_${TARGET_LAYER}.log" 2>&1; then
+    echo "  OK"
+  else
+    fail "$O/lift_search_${TARGET_LAYER}.log"
+  fi
+}
+
 say "阶段 0  右臂和升降预归位（左臂保持当前姿态进入碰撞场）"
 cd "$G"
 if $PY scripts/normalize_to_grasp_start.py --right-and-lift-only \
@@ -155,27 +190,49 @@ else
   fail "$O/norm.log"
 fi
 
-if [ "$LAYER" = lower ]; then
-  # Empty gripper, arm on the taught tuck pose (the gate above just proved
-  # both), so this is the same descent the cross-layer cycle makes holding a
-  # bottle -- minus the bottle.  It happens before the stack starts so the
-  # bridge publishes 250 from its first sample and the plan is made there.
-  say "阶段 1.5  升降 647 -> $PICK_LIFT_MM（空手下降，为下层抓取）"
-  cd "$G"
-  if $PY -c "
-import sys; sys.path.insert(0, '.')
-from shelf_dispenser.mobile_body import LiftSocketAdapter
-from utils.config import load_config
-cfg = load_config('config.yaml')
-lift = LiftSocketAdapter(cfg.connections.left_arm_ip, cfg.connections.arm_port)
-after = lift.move_to($PICK_LIFT_MM, speed=30)
-print(after)
-sys.exit(0 if abs(int(after.height_mm) - $PICK_LIFT_MM) <= 5 else 1)
-" > "$O/lift_down.log" 2>&1; then
-    echo "  OK"
-  else
-    fail "$O/lift_down.log"
-  fi
+if [ "$LAYER" = auto ]; then
+  SELECTED_LAYER=
+  for CANDIDATE_LAYER in upper lower; do
+    move_empty_platform_to_layer "$CANDIDATE_LAYER"
+    say "层间搜索  扫描 $CANDIDATE_LAYER 层的 $PRODUCT_CODE"
+    cd "$G"
+    if $PY scripts/capture_mtc_direct_pick_scene.py \
+        --target-product "$PRODUCT_CODE" \
+        --scenario-out "$O/search_${CANDIDATE_LAYER}.yaml" \
+        > "$O/search_${CANDIDATE_LAYER}.log" 2>&1; then
+      SELECTED_LAYER=$CANDIDATE_LAYER
+      echo "  找到 $PRODUCT_CODE：$SELECTED_LAYER 层"
+      break
+    else
+      SEARCH_STATUS=$?
+      if [ "$SEARCH_STATUS" = 3 ]; then
+        echo "  $CANDIDATE_LAYER 层没有 $PRODUCT_CODE"
+      else
+        # An empty layer is the typed exit 3 above. Anything else is a broken
+        # perception/safety precondition, not permission to move again.
+        fail "$O/search_${CANDIDATE_LAYER}.log"
+      fi
+    fi
+  done
+  [ -n "$SELECTED_LAYER" ] || {
+    echo "两层都没有找到 $PRODUCT_CODE"
+    echo CYCLE_DONE
+    exit 1
+  }
+  LAYER=$SELECTED_LAYER
+  case "$LAYER" in
+    upper) PICK_LIFT_MM=647 ;;
+    lower) PICK_LIFT_MM=250 ;;
+  esac
+  [ "$PICK_ONLY" = 1 ] || [ "$LAYER" = upper ] || {
+    echo "找到 $PRODUCT_CODE 在下层，但当前自动放置只验证了上层抓取 -> 下层货架。" >&2
+    echo "侧桌 profile 尚未现场验证；拒绝抓起一个没有安全去处的瓶子。" >&2
+    exit 1
+  }
+elif [ "$LAYER" = lower ]; then
+  # The atomic gate above proves both arms are tucked before the empty lift
+  # moves. The planning stack starts afterwards at the selected live height.
+  move_empty_platform_to_layer lower
 fi
 
 start_stack pick

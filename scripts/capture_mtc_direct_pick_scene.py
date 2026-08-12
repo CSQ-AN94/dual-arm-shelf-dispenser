@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 from shelf_dispenser.orchestrator import RunOrchestrator
 from shelf_dispenser import head_lock
-from shelf_dispenser.core import SafetyAbort
+from shelf_dispenser.core import BottleDetectionLost, SafetyAbort
 from shelf_dispenser.run_manifest import write_run_manifest
 from run_pick_place_task import build_parser as build_task_parser
 from localization_to_mtc_scenario import build_scenario
@@ -144,4 +144,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except BottleDetectionLost as exc:
+        # The layer-search runner treats only this typed result as an empty
+        # layer. Camera, depth, calibration and safety failures keep exit 1/2
+        # and must not make the lift search somewhere else.
+        print(f"未找到目标: {exc}", file=sys.stderr)
+        raise SystemExit(3)
