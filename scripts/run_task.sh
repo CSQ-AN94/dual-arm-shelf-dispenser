@@ -138,6 +138,35 @@ if [[ "$#" -ne 1 ]]; then
   exit 1
 fi
 
+# ===================== 这条管线已废弃，不要运行 =====================
+#
+# 它是 table_demo 时代的抓取管线：头部粗定位 -> 移到右腕观察位 -> 右腕精定位
+# -> 抓取 -> 放置。抓取主线不走这条路，也没有右腕相机和观察位。
+#
+# 2026-08-12 四次尝试全部没走到抓取：两次直接死于这条管线自己的遗产
+#   * 开场要从货架收拢位横跨 228° 去 table_demo 的停放位姿，
+#     四条路线三条被电子围栏拒（TCP x≈+0.60）、一条需要 41 条控制指令 > 队列 30
+#   * 右腕观察位求解，34 个候选连续淘汰
+# 而主线（run_cross_layer_cycle.sh）同期真机抓取 4 次 3 成。
+#
+# 侧桌投放曾经只活在这条上，但它一次都没成功过，所以停用它没有丢掉任何
+# 已验证的能力。迁移方案见 docs/GRASP_MAINLINE.md。
+#
+# 要强行运行（只应在做迁移、且清楚风险时）：
+#   I_KNOW_THIS_PIPELINE_IS_RETIRED=1 bash scripts/run_task.sh <mode>
+#
+if [[ "${I_KNOW_THIS_PIPELINE_IS_RETIRED:-0}" != "1" ]]; then
+  echo "拒绝: 这条抓取管线已于 2026-08-12 废弃，不要运行。" >&2
+  echo "" >&2
+  echo "  货架抓取请用主线：" >&2
+  echo "    PRODUCT_CODE=P01 LAYER=upper PICK_ONLY=1 bash scripts/run_cross_layer_cycle.sh" >&2
+  echo "" >&2
+  echo "  为什么废弃、以及侧桌投放怎么迁到主线：docs/GRASP_MAINLINE.md" >&2
+  exit 2
+fi
+echo "!! 警告: 正在运行已废弃的旧管线（I_KNOW_THIS_PIPELINE_IS_RETIRED=1）" >&2
+
+
 # These values are later embedded in rsync/SSH destinations and a remote shell
 # command.  Keep the supported override surface deliberately narrow instead of
 # accepting whitespace, quotes or shell metacharacters.

@@ -48,6 +48,11 @@ def _fake_transport(tmp_path: Path) -> tuple[dict[str, str], Path]:
         env.pop(name, None)
     env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
     env["LAUNCHER_CALL_LOG"] = str(call_log)
+    # The launcher refuses to run at all since 2026-08-12 -- it is the retired
+    # pipeline.  These tests still pin its argument handling, because that is
+    # what a migration will read, so they opt past the retirement gate the same
+    # way a migration would.
+    env["I_KNOW_THIS_PIPELINE_IS_RETIRED"] = "1"
     return env, call_log
 
 
