@@ -74,7 +74,6 @@ def _profile(**overrides):
             ),
         ),
         use_dynamic_rgbd=True,
-        home_joints_deg=None,
     )
     values.update(overrides)
     return SafetyProfile(**values)

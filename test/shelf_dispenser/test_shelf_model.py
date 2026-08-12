@@ -78,7 +78,6 @@ def _profile(keepout_boxes, **overrides):
         ),
         keepout_boxes=keepout_boxes,
         use_dynamic_rgbd=True,
-        home_joints_deg=None,
     )
     values.update(overrides)
     return SafetyProfile(**values)

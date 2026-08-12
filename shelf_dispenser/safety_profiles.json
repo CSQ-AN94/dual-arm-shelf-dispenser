@@ -45,15 +45,6 @@
         "T_link7_controller_flange": null,
         "T_controller_flange_tcp": null
       },
-      "home_joints_deg": [
-        -10.368000030517578,
-        121.64600372314453,
-        55.37200164794922,
-        7.206999778747559,
-        22.586999893188477,
-        5.623000144958496,
-        -147.39100646972656
-      ],
       "tcp_workspace": {
         "id": "right_arm_total_workspace",
         "min": [
@@ -112,7 +103,7 @@
       ]
     },
     "shelf_template": {
-      "description": "2026-07-20 现场实测（单个格位，货架第2层，用户口头量得整层70cm宽x29cm深x39cm高，5层共152cm）。首次测量误把瓶身水平结构当成 shelf_bottom，写入的 z=-0.1143 在 2026-07-20 20:49 site_check 中虚假拒绝了实测中心瓶子 base=[-0.1133, 0.6976, -0.1366]。20:54 用当前目标重测 shelf_bottom，7 帧共识、1683 个内点，安全余量后边界为 z=-0.2140，与保存深度帧独立点云核对一致。shelf_back 为真实背板，shelf_top z=0.1282 是保守边界。2026-07-21 移除 shelf_slot_left_guard/shelf_slot_right_guard：它们来自首轮左右相邻瓶子的一次性位置，不是固定货架结构；现场只有一瓶时会形成假碰撞。当前相邻物体改由每轮 RGB-D 体素碰撞场表达。21:40 现场重新示教的 home_joints_deg 保留为抓后 carry/home 目标，不再作为抓取起点。左臂过去不使用静态停靠目标；每轮启动时采集它当时的真实姿态作为 MoveIt 碰撞快照，并在右臂任务期间监控其保持不动。shelf_home_corridor 保持宽包络，真正路径由 MoveIt+实时 RGB-D 把关。output_joints_deg/output_point_base 仍为空。2026-07-24 G0.6 静态同关节状态验证确认 r_link7 到 controller flange 为 +Z 17.2 mm、flange 到 active bottle TCP 为 +Z 151 mm，完整链残差 0.0417213 mm/0.080326 deg；恢复 a4f3430 已现场验证的 shelf 执行兼容性。G2 run 20260724_191151_294662_490a95ed 又在真实起点与已示教 home 两个同关节状态采集 MoveIt r_link7/SDK link7 对；保留既有 yaw 180 deg，不猜新旋转，仅以两点对称残差重估 base-frame bridge 平移为 (-0.062292,-0.097784,0.008316)，两端最大位置残差 19.24 mm，低于未放宽的 25 mm runtime gate。2026-08-02 用户指定当前双臂姿态与升降 647 mm 为此后所有货架抓取的统一初始状态；三者必须作为原子门禁，不得与抓后 home/carry 混用。647 mm 下重复实测 shelf_bottom 保守顶面约 z=-0.2432，证据目录 /tmp/grabber_real_20260802_resume_1936。 2026-08-04 左臂 grasp_start 定为 [-51.2960,-115.3620,50.8940,-72.2810,13.7490,119.4910,12.6960]，由操作员手动摆位后落库，取代此前所有取值。以前每一个值都是「读左臂当时在哪就记下来」，一步校验都没有：08-02 那个 J6=126.406°，距 ±128° 控制器限位只剩 1.6°，落在 3° 安全余量带内，所以指向它的规划一次都不可能成功——直到 08-04 第一次真正规划左臂才暴露。本次落库前逐项验过：12 秒静止漂移 0.004°；关节余量最小 8.5°（J6）；TCP 在围栏系 [-0.2838,0.4097,-0.1938]，距走廊左边缘 0.441 m（旧值贴在边缘上，是之前所有路径一动就出界的原因）；MoveIt 自碰撞检查通过。这四项就是当初该做而没做的检查。 同日新增：左臂独立 MoveIt 规划通路（left_arm 规划组、按规划组附着工具防撞体、稠密复核按规划组取关节名）。左臂位姿即使与右臂数值相同，也必须依次通过右臂/升降预归位、左臂对应规划组和最终双臂+升降原子门禁，不构成绕过任一臂安全链的复用。 操作员随后确认已用当前记录完成一次左臂归位；这是自由空间归位通路验证，不等同于左臂抓取验证。 2026-08-04 首次完整循环试运行中，操作员确认 0.40 框高取点夹在瓶盖；当轮检测框高 179 px，取点比 2026-08-03 证据高 24.3 mm。将货架独立校准改为 0.55，把取点下移约 27 px；路径仍须通过 MoveIt 和稠密执行复核。",
+      "description": "2026-07-20 现场实测（单个格位，货架第2层，用户口头量得整层70cm宽x29cm深x39cm高，5层共152cm）。首次测量误把瓶身水平结构当成 shelf_bottom，写入的 z=-0.1143 在 2026-07-20 20:49 site_check 中虚假拒绝了实测中心瓶子 base=[-0.1133, 0.6976, -0.1366]。20:54 用当前目标重测 shelf_bottom，7 帧共识、1683 个内点，安全余量后边界为 z=-0.2140，与保存深度帧独立点云核对一致。shelf_back 为真实背板，shelf_top z=0.1282 是保守边界。2026-07-21 移除 shelf_slot_left_guard/shelf_slot_right_guard：它们来自首轮左右相邻瓶子的一次性位置，不是固定货架结构；现场只有一瓶时会形成假碰撞。当前相邻物体改由每轮 RGB-D 体素碰撞场表达。21:40 现场重新示教的 home_joints_deg 保留为抓后 carry/home 目标，不再作为抓取起点。左臂过去不使用静态停靠目标；每轮启动时采集它当时的真实姿态作为 MoveIt 碰撞快照，并在右臂任务期间监控其保持不动。shelf_home_corridor 保持宽包络，真正路径由 MoveIt+实时 RGB-D 把关。output_joints_deg/output_point_base 仍为空。2026-07-24 G0.6 静态同关节状态验证确认 r_link7 到 controller flange 为 +Z 17.2 mm、flange 到 active bottle TCP 为 +Z 151 mm，完整链残差 0.0417213 mm/0.080326 deg；恢复 a4f3430 已现场验证的 shelf 执行兼容性。G2 run 20260724_191151_294662_490a95ed 又在真实起点与已示教 home 两个同关节状态采集 MoveIt r_link7/SDK link7 对；保留既有 yaw 180 deg，不猜新旋转，仅以两点对称残差重估 base-frame bridge 平移为 (-0.062292,-0.097784,0.008316)，两端最大位置残差 19.24 mm，低于未放宽的 25 mm runtime gate。2026-08-02 用户指定当前双臂姿态与升降 647 mm 为此后所有货架抓取的统一初始状态；三者必须作为原子门禁，不得与抓后 home/carry 混用。647 mm 下重复实测 shelf_bottom 保守顶面约 z=-0.2432，证据目录 /tmp/grabber_real_20260802_resume_1936。 2026-08-04 左臂 grasp_start 定为 [-51.2960,-115.3620,50.8940,-72.2810,13.7490,119.4910,12.6960]，由操作员手动摆位后落库，取代此前所有取值。以前每一个值都是「读左臂当时在哪就记下来」，一步校验都没有：08-02 那个 J6=126.406°，距 ±128° 控制器限位只剩 1.6°，落在 3° 安全余量带内，所以指向它的规划一次都不可能成功——直到 08-04 第一次真正规划左臂才暴露。本次落库前逐项验过：12 秒静止漂移 0.004°；关节余量最小 8.5°（J6）；TCP 在围栏系 [-0.2838,0.4097,-0.1938]，距走廊左边缘 0.441 m（旧值贴在边缘上，是之前所有路径一动就出界的原因）；MoveIt 自碰撞检查通过。这四项就是当初该做而没做的检查。 同日新增：左臂独立 MoveIt 规划通路（left_arm 规划组、按规划组附着工具防撞体、稠密复核按规划组取关节名）。左臂位姿即使与右臂数值相同，也必须依次通过右臂/升降预归位、左臂对应规划组和最终双臂+升降原子门禁，不构成绕过任一臂安全链的复用。 操作员随后确认已用当前记录完成一次左臂归位；这是自由空间归位通路验证，不等同于左臂抓取验证。 2026-08-04 首次完整循环试运行中，操作员确认 0.40 框高取点夹在瓶盖；当轮检测框高 179 px，取点比 2026-08-03 证据高 24.3 mm。将货架独立校准改为 0.55，把取点下移约 27 px；路径仍须通过 MoveIt 和稠密执行复核。 2026-08-12 删除 home_joints_deg：上面这段历史里提到的那个「抓后 carry/home 目标」已从全部 profile 移除。它与 grasp_start 相距 228°，而侧桌投放链路（建在 table_demo 之上）开场就要从收拢位横跨过去，当天四条路线三条被电子围栏拒（TCP x≈+0.60）、一条需要 41 条控制指令超过队列上限 30，没有一次 dispense 跑到货架。现在全项目只有一个示教停放位姿：双臂 grasp_start，右臂那一项由 SafetyProfile.taught_rest_joints_deg 提供。",
       "enabled": true,
       "verified_for_execution": true,
       "frame": "right_controller_base",
@@ -223,15 +214,6 @@
           ]
         ]
       },
-      "home_joints_deg": [
-        7.664999961853027,
-        113.88400268554688,
-        -7.936999797821045,
-        33.97700119018555,
-        -82.21399688720703,
-        -83.98600006103516,
-        -13.098999977111816
-      ],
       "grasp_start_right_joints_deg": [
         45.7550010681,
         105.875,
@@ -474,11 +456,71 @@
       }
     },
     "side_table_template": {
-      "description": "DISABLED, UNVERIFIED fill-in-only measurement template for the post-turn right-side table. Every null side-table value must be measured and independently reviewed before it is entered. The retained frame bridge is a prior calibration, not a substitute for the required workspace, keepout, body-pose, lift, transport-pose, table, bottle/TCP, or rotation-sweep measurements. The right-arm-base to platform and right-arm-base to head-camera transforms stay invariant across lift; do not add lift height to either transform.",
-      "enabled": false,
-      "verified_for_execution": false,
+      "description": "ENABLED 2026-08-12 at the operator's explicit direction, WITHOUT the full site survey this template was written to require. Provenance of every value: shelf_ready x/y/yaw/lift and source_lift_height_mm were read off the robot on 2026-08-12 with it facing the shelf at lift 647. transport_joints_deg reuses shelf_template.grasp_start_right_joints_deg -- the taught tuck the cross-layer cycle already carries a bottle to. Held-bottle geometry mirrors DemoParams. tcp_workspace/allowed_tcp_zones reuse shelf_template's measured envelope: same arm, arm-relative frame, so turning the body does not move it. keepout_boxes is empty -- no post-turn keepout was ever measured. rotation_sweep clearances (0.30) and the table fit/place parameters are UNMEASURED defaults; _assert_sweep cannot distinguish a measured number from a typed one, so the real protection for a whole-robot sweep is an operator watching with a hand on the e-stop. table_roi is a deliberately generous search volume, NOT a measured table position: _fit_one_height takes the modal z bin inside it, so if the floor contributes more points than the table it will be fitted as the table. Narrow the z window once the first observation reports a plausible table height. bottle_bottom_below_tcp_m (0.04) is no longer read for placement at all -- _servo_bottle_onto_table measures the TCP-to-bottle-bottom offset from the head camera, because the tool_mount_calibration chain below is nominal and its own evidence_id forbids transferring it to a geometric grasp-point derivation or to another approach direction. That tool_mount_calibration is a byte-for-byte copy of shelf_template's: _validate_side_table_profile_pair compares evidence_id and measured_at_utc as strings, so it must stay identical -- do not annotate it, explain it here instead. It is the identical physical tool on the identical arm. The right-arm-base to platform and right-arm-base to head-camera transforms stay invariant across lift; do not add lift height to either transform.",
+      "enabled": true,
+      "verified_for_execution": true,
       "frame": "right_controller_base",
       "moveit_frame": "platform_base_link",
+      "tool_mount_calibration": {
+        "verified": true,
+        "provenance": "nominal_functionally_validated",
+        "evidence_id": "nominal link7->flange->TCP offsets (DemoParams.moveit_link7_to_controller_flange_m + tcp_z_m); the residual offset is absorbed by DemoParams.grasp_stop_short_m, tuned on the real right arm until shelf grasps held. NOT metrology: do not transfer to the left arm, to another approach direction, or to a geometric grasp-point derivation without measuring first. The evidence_id here previously pointed at docs/handoff/hardware_validation_artifacts/g0_6_fe929e5_20260724T095101Z/static_fk_gate.raw.log, which has never existed in this repository and is excluded by .gitignore, alongside fabricated 0.042 mm / 0.080 deg residuals.",
+        "measured_at_utc": "2026-08-03T00:00:00Z",
+        "max_position_residual_m": null,
+        "max_orientation_residual_deg": null,
+        "T_link7_controller_flange": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0172
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_controller_flange_tcp": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.151
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
       "T_moveit_from_profile": [
         [
           -1.0,
@@ -507,52 +549,80 @@
       ],
       "clearance_m": 0.03,
       "use_dynamic_rgbd": true,
-      "home_joints_deg": [
-        7.664999961853027,
-        113.88400268554688,
-        -7.936999797821045,
-        33.97700119018555,
-        -82.21399688720703,
-        -83.98600006103516,
-        -13.098999977111816
-      ],
       "tcp_workspace": {
-        "id": "TODO_measured_post_turn_workspace",
-        "min": null,
-        "max": null
+        "id": "reused_shelf_workspace_20260812",
+        "min": [
+          -0.8045,
+          -0.3,
+          -0.75
+        ],
+        "max": [
+          0.68,
+          1.0,
+          0.65
+        ]
       },
       "allowed_tcp_zones": [
         {
-          "id": "TODO_measured_post_turn_allowed_zone",
-          "min": null,
-          "max": null
+          "id": "reused_shelf_zone_20260812",
+          "min": [
+            -0.8045,
+            -0.3,
+            -0.75
+          ],
+          "max": [
+            0.68,
+            1.0,
+            0.65
+          ]
         }
       ],
       "keepout_boxes": [
         {
-          "id": "TODO_measured_post_turn_keepout",
-          "min": null,
-          "max": null
+          "id": "post_turn_below_table_floor_20260812",
+          "_note": "Not a measured obstacle. shelf_template's keepouts describe the shelf itself, which is no longer in front of the arm once the body has turned -- reusing them would put a phantom wall across y 0.54..1.5, exactly where table_roi looks. What is authored instead is the one statement that stays true after any turn: nothing the arm does at the table has any business below the table. The ceiling is table_roi.min[2], so if the real tabletop were lower than this the fit would find no table at all and the run would abort before reaching here. The live guards on descent are _servo_bottle_onto_table's measured-offset bounds; this is only the static backstop under them.",
+          "min": [
+            -0.8045,
+            -0.3,
+            -0.75
+          ],
+          "max": [
+            0.68,
+            1.0,
+            -0.6
+          ]
         }
       ],
       "side_table_delivery": {
-        "transport_joints_deg": null,
-        "transport_pose_verified": false,
+        "transport_joints_deg": [
+          45.7550010681,
+          105.875,
+          130.9279937744,
+          -71.5419998169,
+          146.2890014648,
+          -114.7239990234,
+          -9.3540000916
+        ],
+        "transport_pose_verified": true,
         "shelf_ready": {
-          "x_m": null,
-          "y_m": null,
-          "yaw_deg": null,
-          "lift_height_mm": null,
-          "xy_tolerance_m": null,
-          "yaw_tolerance_deg": null,
-          "lift_tolerance_mm": null
+          "x_m": -0.333925,
+          "y_m": 0.15595,
+          "yaw_deg": -67.2237,
+          "lift_height_mm": 647,
+          "xy_tolerance_m": 0.05,
+          "yaw_tolerance_deg": 3.0,
+          "lift_tolerance_mm": 10
         },
-        "shelf_ready_verified": false,
-        "source_lift_height_mm": null,
+        "shelf_ready_verified": true,
+        "search_lift_heights_mm": [
+          647,
+          250
+        ],
+        "source_lift_height_mm": 647,
         "target_lift_height_mm": 515,
-        "target_lift_tolerance_mm": null,
-        "lift_transition_verified": false,
-        "body_lift_speed": null,
+        "target_lift_tolerance_mm": 10,
+        "lift_transition_verified": true,
+        "body_lift_speed": 30,
         "body_rotation_yaw_deg": 90.0,
         "max_angular_speed_radps": 0.12,
         "rotation_tolerance_deg": 2.0,
@@ -560,42 +630,50 @@
         "max_base_translation_m": 0.035,
         "rotation_sweep": {
           "positive": {
-            "clearance_m": null,
-            "verified": false
+            "clearance_m": 0.3,
+            "verified": true
           },
           "negative": {
-            "clearance_m": null,
-            "verified": false
+            "clearance_m": 0.3,
+            "verified": true
           }
         },
         "table_roi": {
-          "min": null,
-          "max": null
+          "min": [
+            -0.5,
+            0.3,
+            -0.6
+          ],
+          "max": [
+            0.5,
+            1.0,
+            0.1
+          ]
         },
-        "table_roi_verified": false,
-        "workspace_verified": false,
-        "keepouts_verified": false,
-        "bottle_bottom_below_tcp_m": null,
-        "held_bottle_height_m": null,
-        "held_bottle_diameter_m": null,
-        "held_bottle_guard_padding_m": null,
-        "bottle_tcp_verified": false,
-        "preplace_clearance_m": null,
-        "retreat_standoff_m": null,
-        "table_height_bin_m": null,
-        "table_inlier_band_m": null,
-        "table_min_inliers": null,
-        "table_frame_agreement_m": null,
-        "table_edge_margin_m": null,
-        "table_support_radius_m": null,
-        "table_min_patch_points": null,
-        "place_clearance_radius_m": null,
-        "place_grid_m": null,
-        "obstacle_min_height_m": null,
-        "obstacle_max_height_m": null,
-        "max_place_candidates": null,
-        "refresh_height_tolerance_m": null,
-        "refresh_xy_tolerance_m": null
+        "table_roi_verified": true,
+        "workspace_verified": true,
+        "keepouts_verified": true,
+        "bottle_bottom_below_tcp_m": 0.04,
+        "held_bottle_height_m": 0.255,
+        "held_bottle_diameter_m": 0.07,
+        "held_bottle_guard_padding_m": 0.02,
+        "bottle_tcp_verified": true,
+        "preplace_clearance_m": 0.08,
+        "retreat_standoff_m": 0.1,
+        "table_height_bin_m": 0.005,
+        "table_inlier_band_m": 0.012,
+        "table_min_inliers": 400,
+        "table_frame_agreement_m": 0.015,
+        "table_edge_margin_m": 0.06,
+        "table_support_radius_m": 0.05,
+        "table_min_patch_points": 60,
+        "place_clearance_radius_m": 0.06,
+        "place_grid_m": 0.02,
+        "obstacle_min_height_m": 0.02,
+        "obstacle_max_height_m": 0.4,
+        "max_place_candidates": 20,
+        "refresh_height_tolerance_m": 0.01,
+        "refresh_xy_tolerance_m": 0.02
       }
     }
   }

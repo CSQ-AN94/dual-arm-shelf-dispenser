@@ -55,7 +55,8 @@ PLANNING_FRAME = "platform_base_link"
 GROUP = "right_arm"
 RIGHT_JOINTS = [f"r_joint{i}" for i in range(1, 8)]
 LEFT_JOINTS = [f"l_joint{i}" for i in range(1, 8)]
-# 2026-07-15 真机示教并记录在 table_demo.home_joints_deg 的安全垂下姿态。
+# 2026-07-15 真机示教的安全垂下姿态。它当时记在 table_demo.home_joints_deg，
+# 那个字段已于 2026-08-12 从所有 profile 删除；这里保留数值本身作自检夹具。
 # 旧探针 [0,90,0,90,0,0,0] 会让腕部与底盘/车身相交，导致无盒子基线
 # 永远 invalid，进而把正常工作的世界碰撞检测误诊成“碰撞几何没加载”。
 PROBE_RIGHT_DEG = [

@@ -123,15 +123,39 @@ def test_public_from_start_shelf_profile_reaches_planning_admission():
     assert loaded.T_link7_tcp[2, 3] == pytest.approx(0.1682)
 
 
-def test_only_shelf_template_is_enabled_for_execution():
+def test_table_demo_stays_unverified_and_the_two_shelf_profiles_share_a_mount():
+    """side_table_template was enabled on 2026-08-12; table_demo was not.
+
+    _validate_side_table_profile_pair refuses to mix geometry unless the
+    source and delivery profiles name the *identical* mount calibration, so
+    the pairing is what this now guards.  The bytes are shared on purpose:
+    same physical tool, same arm.  If they ever diverge, one of the two is
+    describing a tool the robot is not holding.
+    """
     profiles = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))["profiles"]
 
     assert profiles["table_demo"]["verified_for_execution"] is False
     assert profiles["table_demo"]["tool_mount_calibration"]["verified"] is False
-    assert profiles["side_table_template"]["enabled"] is False
-    assert (
-        profiles["side_table_template"]["verified_for_execution"] is False
-    )
+
+    shelf = profiles["shelf_template"]["tool_mount_calibration"]
+    side = profiles["side_table_template"]["tool_mount_calibration"]
+    assert profiles["side_table_template"]["enabled"] is True
+    assert side["verified"] is True
+    # Whole-block equality, not a field-by-field list.  An earlier version of
+    # this test compared measured_at_utc and both transforms but not
+    # evidence_id -- so a one-sentence annotation appended to the side-table
+    # copy passed every assertion here and then aborted the first real run at
+    # SHELF_READY, because _validate_side_table_profile_pair compares
+    # evidence_id as a string.  Comparing the dicts wholesale is the only
+    # version of this check that cannot be outgrown by a new field.
+    assert side == shelf
+    # Neither shelf profile carries home_joints_deg any more: the taught rest
+    # pose is grasp_start, stated once by shelf_template, and the delivery
+    # profile may only decline to contradict it.  The second pose was a
+    # table_demo posture 228 deg away, and both profiles agreeing on it is
+    # exactly how it survived long enough to stall the 2026-08-12 runs.
+    assert "home_joints_deg" not in profiles["shelf_template"]
+    assert "home_joints_deg" not in profiles["side_table_template"]
 
 
 def test_authored_shelf_axes_require_a_verified_full_mount_before_execution(tmp_path):
@@ -295,17 +319,20 @@ def test_delivery_profile_must_use_the_same_physical_tool_mount_chain():
     home = tuple([0.0] * 7)
     demo = RunOrchestrator.__new__(RunOrchestrator)
     demo.safety = SimpleNamespace(
-        home_joints_deg=home,
+        taught_rest_joints_deg=home,
+        name="fake",
         tool_mount_calibration=mount(),
     )
     demo.delivery_safety = SimpleNamespace(
-        home_joints_deg=home,
+        taught_rest_joints_deg=home,
+        name="fake",
         tool_mount_calibration=mount(),
     )
     demo._validate_side_table_profile_pair()
 
     demo.delivery_safety = SimpleNamespace(
-        home_joints_deg=home,
+        taught_rest_joints_deg=home,
+        name="fake",
         tool_mount_calibration=mount(offset=0.001),
     )
     with pytest.raises(SafetyAbort, match="工具安装标定不一致"):
