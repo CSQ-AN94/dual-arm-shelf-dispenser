@@ -8,7 +8,7 @@
     python3 scripts/side_table_profile_status.py
 
 缺口全部补齐时退出码 0，还有 null / false 时退出码 1。每项该怎么量、量出来的
-数该往哪填，见 docs/side_table_delivery_reopening.md。
+数该往哪填，见 docs/side_table_delivery_state_20260812.md。
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ def main() -> int:
     if missing:
         print(
             "\n还有缺口，入口保持关闭。量测方法见 "
-            "docs/side_table_delivery_reopening.md",
+            "docs/side_table_delivery_state_20260812.md",
             file=sys.stderr,
         )
         return 1

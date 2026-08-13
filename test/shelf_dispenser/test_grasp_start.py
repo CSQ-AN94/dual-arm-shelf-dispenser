@@ -41,7 +41,7 @@ LEFT = [
 ]
 
 
-def test_shelf_grasp_start_is_recorded_separately_from_home():
+def test_shelf_grasp_start_is_the_only_taught_rest_pose():
     profile = load_safety_profile(
         PROFILES, "shelf_template", require_verified=False
     )
@@ -50,7 +50,11 @@ def test_shelf_grasp_start_is_recorded_separately_from_home():
     assert profile.grasp_start_left_joints_deg == pytest.approx(LEFT)
     assert "完成一次左臂归位" in profile.description
     assert profile.grasp_start_lift_height_mm == 647
-    assert profile.home_joints_deg != pytest.approx(RIGHT)
+    # There is no second taught pose to be 'separate from' any more.  The
+    # dual-arm grasp start is it, and the right arm's half of it is what
+    # every return-to-rest plans to.
+    assert not hasattr(profile, "home_joints_deg")
+    assert profile.taught_rest_joints_deg == pytest.approx(RIGHT)
     shelf_bottom = next(
         box for box in profile.keepout_boxes if box.id == "shelf_bottom"
     )

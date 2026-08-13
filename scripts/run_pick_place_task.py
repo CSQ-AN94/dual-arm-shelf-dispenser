@@ -131,8 +131,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--return-home",
         action="store_true",
         help=(
-            "放回后额外用 MoveIt 规划返回 profile 里的 home_joints_deg"
-            "（跟去程一样只受电子围栏保护，需要该 profile 配置了 home_joints_deg）"
+            "放回后额外用 MoveIt 规划返回 profile 的示教停放位姿"
+            "（跟去程一样只受电子围栏保护；货架 profile 用的是双臂收拢位的右臂项）"
         ),
     )
     parser.add_argument(
@@ -149,6 +149,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "转向后的独立桌面电子围栏 profile；必须现场测量并配置 "
             "side_table_delivery，禁止复用转向前货架坐标"
+        ),
+    )
+    parser.add_argument(
+        "--shelf-layer-lift-mm",
+        type=int,
+        default=None,
+        help=(
+            "层间搜索已把空载升降停在哪一层（mm）。只能取 profile 的 "
+            "search_lift_heights_mm 之一；SHELF_READY 与返程高度都改用它。"
+            "不给则用 profile 自己的 SHELF_READY 高度"
         ),
     )
     parser.add_argument(
@@ -275,6 +285,11 @@ def validate_args(args: argparse.Namespace) -> argparse.Namespace:
         raise SystemExit("--dispense requires --delivery-safety-profile")
     if args.delivery_safety_profile and not args.dispense:
         raise SystemExit("--delivery-safety-profile requires --dispense")
+    if args.shelf_layer_lift_mm is not None and not args.dispense:
+        # Outside dispense nothing reads it, and silently ignoring a height
+        # the caller believes it selected is how a run picks from the wrong
+        # layer without anyone noticing.
+        raise SystemExit("--shelf-layer-lift-mm requires --dispense")
     if args.task_mode and any(
         (
             args.plan_only,

@@ -78,7 +78,7 @@ deployment instead needs to *deliver* the bottle to an output/pickup point.
 `DeliverMode.DISPENSE` (CLI: `--task-mode ... --dispense`) does **not** select
 `_deliver_to_output` — it selects `RunOrchestrator._dispense_to_side_table`,
 whose contract is `side_table_delivery` in the *delivery* profile, not the two
-fields below. See `docs/side_table_delivery_reopening.md`; that flow is closed
+fields below. See `docs/side_table_delivery_state_20260812.md`; that flow is closed
 until its profile is measured, and `scripts/side_table_profile_status.py`
 prints what is still missing.
 

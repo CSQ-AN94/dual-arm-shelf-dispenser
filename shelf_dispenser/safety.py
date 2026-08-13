@@ -105,7 +105,6 @@ class SafetyProfile:
     allowed_tcp_zones: tuple[FenceBox, ...]
     keepout_boxes: tuple[FenceBox, ...]
     use_dynamic_rgbd: bool
-    home_joints_deg: tuple[float, ...] | None
     # Repeatable, empty-handed shelf-pick admission state.  This is not the
     # post-pick carry/home posture: every new shelf grasp starts from this
     # measured dual-arm + lift state, while home remains a later task target.
@@ -114,13 +113,13 @@ class SafetyProfile:
     grasp_start_lift_height_mm: int | None = None
     # Optional open/high posture used to leave a low natural-hang start before
     # solving the target-dependent observation transfer.  This is distinct
-    # from ``home_joints_deg``: home is where the task parks; staging is a
+    # from the taught rest pose: rest is where the task parks; staging is a
     # proven planning seed that avoids asking one global search to both unfold
     # a near-singular arm and arrive at the bottle-facing wrist pose.
     observation_staging_joints_deg: tuple[float, ...] | None = None
     # Real dispensing (as opposed to table_demo's place-back-in-place cycle):
     # where to carry a held bottle before releasing it. Same structural
-    # contract as home_joints_deg — absent by default, _deliver_to_output
+    # contract as the taught rest pose — absent by default, _deliver_to_output
     # fails closed if a caller asks for it without this configured.
     output_joints_deg: tuple[float, ...] | None = None
     # Whether the output point is expected to be visible to the fixed head
@@ -185,6 +184,21 @@ class SafetyProfile:
             return point
         matrix = np.asarray(self.tcp_frame_transform, dtype=float)
         return matrix[:3, :3] @ point + matrix[:3, 3]
+
+    @property
+    def taught_rest_joints_deg(self) -> tuple[float, ...] | None:
+        """The one taught pose this profile starts and parks the right arm on.
+
+        It is the right arm's half of the dual-arm + lift grasp start -- the
+        state the atomic gate verifies before every shelf pick -- and there is
+        no second one.  There used to be: ``home_joints_deg``, a table_demo
+        posture 228 deg away, which the side-table flow drove to on startup
+        because that flow was written on top of table_demo.  On 2026-08-12 the
+        fence refused three routes between them at TCP x≈+0.60 and a fourth
+        needed 41 controller commands against a queue of 30, so no dispense run
+        ever reached the shelf.  Deleted, profiles included.
+        """
+        return self.grasp_start_right_joints_deg
 
     def assert_grasp_start(
         self,
@@ -505,6 +519,10 @@ class SideTableDeliveryConfig:
     transport_pose_verified: bool
     shelf_ready: ShelfReadyConfig
     shelf_ready_verified: bool
+    # Every lift height the layer search may leave the body at before
+    # SHELF_READY is captured.  First entry is the no-search default and must
+    # equal shelf_ready.lift_height_mm.
+    search_lift_heights_mm: tuple[int, ...]
     # This duplication is intentional and validated below.  It makes the
     # lift transition auditable while making it impossible for an author to
     # accidentally declare one source height for SHELF_READY and another for
@@ -723,6 +741,40 @@ def _load_tool_mount_calibration(
     )
 
 
+def _load_search_lift_heights(
+    value, *, shelf_ready, label: str
+) -> tuple[int, ...]:
+    """Lift heights the layer search may admit as a SHELF_READY start.
+
+    The dispense flow anchors everything to one immutable SHELF_READY
+    snapshot, so the layer has to be chosen *before* it is captured -- which
+    means more than one lift height can legitimately be the start.  Listing
+    them here keeps that an authored decision rather than a caller-supplied
+    number: ``--shelf-layer-lift-mm`` is only allowed to select from this
+    tuple, so a typo cannot invent a shelf layer the robot has never used.
+
+    The first entry must be the profile's own SHELF_READY height: that is the
+    layer a run with no search starts from, and letting the two disagree
+    would give one flow two different notions of "home".
+    """
+    if not isinstance(value, (list, tuple)) or not value:
+        raise SafetyAbort(f"{label} 必须是非空的升降高度列表")
+    heights = tuple(
+        int(_finite_int(item, label=f"{label}[{index}]"))
+        for index, item in enumerate(value)
+    )
+    if len(set(heights)) != len(heights):
+        raise SafetyAbort(f"{label} 含重复高度")
+    if any(height < 0 for height in heights):
+        raise SafetyAbort(f"{label} 含负高度")
+    if heights[0] != int(shelf_ready.lift_height_mm):
+        raise SafetyAbort(
+            f"{label} 的第一项必须等于 SHELF_READY.lift_height_mm "
+            f"({shelf_ready.lift_height_mm})，当前为 {heights[0]}"
+        )
+    return heights
+
+
 def _load_side_table_delivery(
     raw: dict,
     *,
@@ -743,6 +795,7 @@ def _load_side_table_delivery(
         "transport_pose_verified",
         "shelf_ready",
         "shelf_ready_verified",
+        "search_lift_heights_mm",
         "source_lift_height_mm",
         "target_lift_height_mm",
         "target_lift_tolerance_mm",
@@ -892,6 +945,11 @@ def _load_side_table_delivery(
         shelf_ready_verified=_strict_bool(
             _required_value(data, "shelf_ready_verified", label=label),
             label=f"{label}.shelf_ready_verified",
+        ),
+        search_lift_heights_mm=_load_search_lift_heights(
+            _required_value(data, "search_lift_heights_mm", label=label),
+            shelf_ready=shelf_ready,
+            label=f"{label}.search_lift_heights_mm",
         ),
         source_lift_height_mm=_finite_int(
             _required_value(data, "source_lift_height_mm", label=label),
@@ -1242,15 +1300,6 @@ def load_safety_profile(
         FenceBox.from_dict(item, prefix=f"keepout_{index}")
         for index, item in enumerate(raw.get("keepout_boxes", []))
     )
-    home_raw = raw.get("home_joints_deg")
-    home_joints_deg = None
-    if home_raw is not None:
-        home = np.asarray(home_raw, dtype=float)
-        if home.shape != (7,) or not np.all(np.isfinite(home)):
-            raise SafetyAbort(
-                f"电子围栏 profile {profile_name} 的 home_joints_deg 必须是 7 个有限数"
-            )
-        home_joints_deg = tuple(map(float, home))
     grasp_start_keys = (
         "grasp_start_right_joints_deg",
         "grasp_start_left_joints_deg",
@@ -1435,7 +1484,6 @@ def load_safety_profile(
         allowed_tcp_zones=zones,
         keepout_boxes=keepouts,
         use_dynamic_rgbd=bool(raw.get("use_dynamic_rgbd", True)),
-        home_joints_deg=home_joints_deg,
         grasp_start_right_joints_deg=grasp_start_right_joints_deg,
         grasp_start_left_joints_deg=grasp_start_left_joints_deg,
         grasp_start_lift_height_mm=grasp_start_lift_height_mm,

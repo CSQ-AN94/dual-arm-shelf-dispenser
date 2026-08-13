@@ -132,6 +132,11 @@ def _wire_real_shelf_ready_gate(demo, tmp_path, *, chassis_yaw_deg):
     demo._load_safety_profiles = lambda: None
     demo._validate_side_table_profile_pair = lambda: None
     demo._ensure_mobile_body = lambda: demo.mobile_body
+    # Exercise the real layer resolver rather than stubbing it: without a
+    # selected layer it must hand back the profile's own SHELF_READY config
+    # untouched, which is what every non-search run depends on.
+    demo.args.shelf_layer_lift_mm = None
+    demo._side_table_config = lambda: RunOrchestrator._side_table_config(demo)
 
     def capture():
         demo.calls.append(("capture_shelf_ready",))
@@ -746,23 +751,34 @@ def test_two_runs_started_at_the_same_timestamp_get_distinct_evidence_dirs(
             demo.run_log_handler.close()
 
 
-def test_the_side_table_dispense_entry_is_closed_by_its_profile():
-    """The entry is closed by the shipped profile, not by a hard refusal.
+def test_the_side_table_dispense_entry_is_open_and_profile_gated():
+    """DISPENSE is reachable, and the profile is the only thing gating it.
 
-    `run()` used to raise on DISPENSE unconditionally.  That was a third lock
+    `run()` used to raise on DISPENSE unconditionally; that was a third lock
     in front of two that already hold, and it hid which measurement was
-    missing.  The live gate is this: side_table_template ships disabled, so
-    loading it aborts before any body or arm command.  Reopening the side
-    table means filling the profile, flipping its verified flags on site, and
-    deleting this test on purpose -- which is exactly the ceremony the five
-    acceptance tests above are for.
+    missing.  This test asserted the profile still refused to load, which was
+    true until 2026-08-12.  Now the profile loads, so what is worth pinning
+    is that the entry gained no *second* gate on the way: the only thing
+    standing between a caller and the body is the delivery profile itself.
     """
     from pathlib import Path
 
     from shelf_dispenser.safety import load_safety_profile
 
-    profiles = Path(__file__).resolve().parents[2] / "shelf_dispenser" / "safety_profiles.json"
-    with pytest.raises(SafetyAbort, match="尚未启用"):
-        load_safety_profile(
-            profiles, "side_table_template", require_verified=True
-        )
+    profiles = (
+        Path(__file__).resolve().parents[2]
+        / "shelf_dispenser"
+        / "safety_profiles.json"
+    )
+    profile = load_safety_profile(
+        profiles, "side_table_template", require_verified=True
+    )
+    assert profile.side_table_delivery is not None
+
+    # An unknown deliver mode is still rejected before anything else runs.
+    task = BottlePickPlaceTask.__new__(BottlePickPlaceTask)
+    task.demo = SimpleNamespace(
+        args=SimpleNamespace(task_mode="from-start", dispense=True)
+    )
+    with pytest.raises(SafetyAbort, match="未知送货模式"):
+        task.run(StartMode.FROM_START, deliver_mode="place_on_the_moon")

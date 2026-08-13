@@ -3,7 +3,7 @@
 2026-07-17: the removed guided corridor used to also carry the robot back to
 its hang pose. This restores a "go home" leg using the same trusted mechanism
 already used for the observation leg (MoveIt plan + electronic-fence dense
-check inside _plan_flange), driven by a single home_joints_deg target stored
+check inside _plan_flange), driven by the single taught rest pose stored
 in the safety profile instead of a recorded corridor.
 """
 
@@ -20,30 +20,25 @@ from shelf_dispenser.core import DemoParams, Localization, SafetyAbort
 from shelf_dispenser.safety import load_safety_profile
 
 
-def test_table_demo_profile_has_home_joints_deg():
-    profile = load_safety_profile(
-        Path(__file__).parents[2] / "shelf_dispenser" / "safety_profiles.json",
-        "table_demo",
-        require_verified=False,
-    )
-    assert profile.home_joints_deg is not None
-    assert len(profile.home_joints_deg) == 7
+def test_shelf_template_rests_on_grasp_start_and_has_no_second_home():
+    """The shelf robot has exactly one taught rest pose, and it is the tuck.
 
-
-def test_shelf_template_has_taught_right_home_posture():
-    # 2026-07-20 现场重新示教右臂的高净空停靠位。左臂每轮任务
-    # 采集实时快照，不用这份 profile 里的静态目标。
+    It used to also carry ``home_joints_deg`` -- a table_demo posture 228 deg
+    away -- and that second pose is what stalled every 2026-08-12 side-table
+    run: the flow opened by driving to it from the tuck the arm was already
+    sitting on, and the fence refused three routes at TCP x≈+0.60 while a
+    fourth needed 41 controller commands against a queue of 30.  Deleting it
+    is the fix, so its absence is the thing worth asserting.
+    """
     profile = load_safety_profile(
         Path(__file__).parents[2] / "shelf_dispenser" / "safety_profiles.json",
         "shelf_template",
         require_verified=False,
     )
-    assert profile.home_joints_deg is not None
-    assert len(profile.home_joints_deg) == 7
-    assert profile.home_joints_deg == pytest.approx(
-        [7.665, 113.884, -7.937, 33.977, -82.214, -83.986, -13.099],
-        abs=1e-3,
+    assert profile.taught_rest_joints_deg == pytest.approx(
+        profile.grasp_start_right_joints_deg
     )
+    assert len(profile.taught_rest_joints_deg) == 7
 
 
 def _make_demo(calls):
@@ -52,7 +47,7 @@ def _make_demo(calls):
 
     class FakeSafety:
         name = "fake"
-        home_joints_deg = (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)
+        taught_rest_joints_deg = (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)
 
     demo.safety = FakeSafety()
     demo.stage = lambda name, msg="": calls.append(("stage", name))
@@ -85,8 +80,8 @@ def test_return_home_plans_and_executes_to_profile_target():
 def test_return_home_aborts_without_configured_target():
     calls = []
     demo = _make_demo(calls)
-    demo.safety.home_joints_deg = None
-    with pytest.raises(SafetyAbort, match="home_joints_deg"):
+    demo.safety.taught_rest_joints_deg = None
+    with pytest.raises(SafetyAbort, match="示教停放位姿"):
         demo._return_home()
 
 

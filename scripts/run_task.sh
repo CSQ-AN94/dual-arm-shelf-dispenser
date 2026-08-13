@@ -19,6 +19,12 @@ DISPENSE="${DISPENSE:-0}"
 DELIVERY_SAFETY_PROFILE="${DELIVERY_SAFETY_PROFILE:-}"
 TARGET_PRODUCT="${TARGET_PRODUCT:-}"
 VISUAL_SERVO="${VISUAL_SERVO:-0}"
+# Which shelf layer holds the product.  "auto" walks the profile's
+# search_lift_heights_mm with the head camera before the task starts: the
+# lift is body-only motion, and SHELF_READY has to be captured before the arm
+# session exists, so the search cannot live inside the Python flow.  A fixed
+# height skips the search.  Empty keeps the profile's own SHELF_READY layer.
+SHELF_LAYER="${SHELF_LAYER:-}"
 
 # Do not collapse an explicitly supplied empty value into a default for the
 # new safety controls.  An unset value means "use the established default";
@@ -132,6 +138,35 @@ if [[ "$#" -ne 1 ]]; then
   exit 1
 fi
 
+# ===================== 这条管线已废弃，不要运行 =====================
+#
+# 它是 table_demo 时代的抓取管线：头部粗定位 -> 移到右腕观察位 -> 右腕精定位
+# -> 抓取 -> 放置。抓取主线不走这条路，也没有右腕相机和观察位。
+#
+# 2026-08-12 四次尝试全部没走到抓取：两次直接死于这条管线自己的遗产
+#   * 开场要从货架收拢位横跨 228° 去 table_demo 的停放位姿，
+#     四条路线三条被电子围栏拒（TCP x≈+0.60）、一条需要 41 条控制指令 > 队列 30
+#   * 右腕观察位求解，34 个候选连续淘汰
+# 而主线（run_cross_layer_cycle.sh）同期真机抓取 4 次 3 成。
+#
+# 侧桌投放曾经只活在这条上，但它一次都没成功过，所以停用它没有丢掉任何
+# 已验证的能力。迁移方案见 docs/GRASP_MAINLINE.md。
+#
+# 要强行运行（只应在做迁移、且清楚风险时）：
+#   I_KNOW_THIS_PIPELINE_IS_RETIRED=1 bash scripts/run_task.sh <mode>
+#
+if [[ "${I_KNOW_THIS_PIPELINE_IS_RETIRED:-0}" != "1" ]]; then
+  echo "拒绝: 这条抓取管线已于 2026-08-12 废弃，不要运行。" >&2
+  echo "" >&2
+  echo "  货架抓取请用主线：" >&2
+  echo "    PRODUCT_CODE=P01 LAYER=upper PICK_ONLY=1 bash scripts/run_cross_layer_cycle.sh" >&2
+  echo "" >&2
+  echo "  为什么废弃、以及侧桌投放怎么迁到主线：docs/GRASP_MAINLINE.md" >&2
+  exit 2
+fi
+echo "!! 警告: 正在运行已废弃的旧管线（I_KNOW_THIS_PIPELINE_IS_RETIRED=1）" >&2
+
+
 # These values are later embedded in rsync/SSH destinations and a remote shell
 # command.  Keep the supported override surface deliberately narrow instead of
 # accepting whitespace, quotes or shell metacharacters.
@@ -195,6 +230,17 @@ fi
 if [[ -n "${TARGET_PRODUCT}" && ! "${TARGET_PRODUCT}" =~ ^[A-Za-z0-9_,-]+$ ]]; then
   fail_config "TARGET_PRODUCT 只允许字母、数字、逗号、下划线和连字符"
 fi
+if [[ -n "${SHELF_LAYER}" && "${SHELF_LAYER}" != "auto" && ! "${SHELF_LAYER}" =~ ^[0-9]+$ ]]; then
+  fail_config "SHELF_LAYER 只能是 auto 或升降高度（毫米整数）"
+fi
+if [[ -n "${SHELF_LAYER}" && "${DISPENSE}" != "1" ]]; then
+  fail_config "SHELF_LAYER 只在 DISPENSE=1 时有效"
+fi
+if [[ "${SHELF_LAYER}" == "auto" && -z "${TARGET_PRODUCT}" ]]; then
+  # Searching for "any bottle" would stop at the first layer holding
+  # anything, which is not a search for the product that was ordered.
+  fail_config "SHELF_LAYER=auto 必须同时设置 TARGET_PRODUCT"
+fi
 if ((10#${PORT} < 1 || 10#${PORT} > 65535)); then
   fail_config "PORT 必须是 1-65535 的整数"
 fi
@@ -250,15 +296,13 @@ else
   echo "   阶段入口: 完整 task-mode 默认流程"
 fi
 echo "   本地源码: ${SOURCE_GIT_SHA}；dirty=${SOURCE_DIRTY}；dirty digest=${SOURCE_DIRTY_DIGEST}"
-echo "   确认桌面/瓶子布置正确、机械臂周围清空，并且有人手放在硬件急停上。"
-echo "   现在开始拍视频。"
-echo "   视频已开始且急停就位后，输入：开始"
-echo "   其他任何输入（包括只按 Enter）都会取消；Ctrl+C 也可取消。"
-read -r VIDEO_CONFIRM
-if [[ "${VIDEO_CONFIRM}" != "开始" ]]; then
-  echo "未收到录像与急停确认，已取消，机器人不会开始任务。" >&2
-  exit 2
-fi
+echo "   机械臂周围清空、有人守急停 —— 由操作者自行保证，本脚本不再询问。"
+# The typed 开始 confirmation is gone by operator instruction, 2026-08-12.  It
+# was blocking every non-interactive launch (stdin at EOF counts as "any other
+# input", so the run cancelled), and the operator is the person standing at the
+# e-stop who was being asked.  What replaces it is nothing: this launcher now
+# moves the arm as soon as it is invoked.  Do not invoke it from anything that
+# is not a person who means it.
 
 SSH_OPTIONS=(
   -o ConnectTimeout=8
@@ -274,9 +318,6 @@ echo "== 同步当前 bottle task 代码到机器人（不删除远端文件） 
     --exclude='__pycache__/' --exclude='*.pyc' \
     shelf_dispenser/ \
     scripts/run_pick_place_task.py \
-    scripts/run_task_autonomous.sh \
-    scripts/run_task_resume.sh \
-    scripts/start_task.sh \
     sensors/camera_thread.py \
     "${ROBOT_HOST}:${REMOTE_DIR}/"
 )
@@ -295,6 +336,49 @@ if [[ -n "${EFFECTIVE_COMMISSIONING_SPEED}" ]]; then
 fi
 if [[ "${DISPENSE}" == "1" ]]; then
   EXTRA_ARGS="${EXTRA_ARGS} --dispense --delivery-safety-profile '${DELIVERY_SAFETY_PROFILE}'"
+fi
+
+RESOLVED_SHELF_LAYER=""
+if [[ "${SHELF_LAYER}" == "auto" ]]; then
+  echo "== 层间搜索: 找 ${TARGET_PRODUCT} 在哪一层 =="
+  # Grep the marked line rather than taking all of stdout: CameraThread
+  # prints its RealSense banner with a plain print(), so stdout carries the
+  # camera's chatter as well as the answer.  Progress goes to stderr and
+  # stays visible on this terminal either way.
+  set +e
+  # shellcheck disable=SC2029
+  SEARCH_STDOUT="$(ssh "${SSH_OPTIONS[@]}" "${ROBOT_HOST}" \
+    "cd '${REMOTE_DIR}' && '${REMOTE_PY}' scripts/find_product_shelf_layer.py \
+       --target-product '${TARGET_PRODUCT}' \
+       --safety-profile '${SAFETY_PROFILE}' \
+       --delivery-safety-profile '${DELIVERY_SAFETY_PROFILE}'")"
+  SEARCH_STATUS=$?
+  set -e
+  RESOLVED_SHELF_LAYER="$(
+    printf '%s\n' "${SEARCH_STDOUT}" \
+      | tr -d '\r' \
+      | sed -n 's/^SHELF_LAYER_LIFT_MM=\([0-9][0-9]*\)$/\1/p' \
+      | tail -1
+  )"
+  if [[ "${SEARCH_STATUS}" == "3" ]]; then
+    echo "搜索过的货架层里没有 ${TARGET_PRODUCT}。补货，或换 TARGET_PRODUCT。" >&2
+    exit 3
+  fi
+  if [[ "${SEARCH_STATUS}" != "0" ]]; then
+    # A camera/depth/lift failure is not an empty shelf and must not be
+    # retried at another height by the caller either.
+    echo "层间搜索失败（rc=${SEARCH_STATUS}），不是「这层没货」。先修，再跑。" >&2
+    exit "${SEARCH_STATUS}"
+  fi
+  if [[ ! "${RESOLVED_SHELF_LAYER}" =~ ^[0-9]+$ ]]; then
+    fail_config "层间搜索返回了非法高度: ${RESOLVED_SHELF_LAYER}"
+  fi
+  echo "== 找到 ${TARGET_PRODUCT}：升降 ${RESOLVED_SHELF_LAYER} mm =="
+elif [[ -n "${SHELF_LAYER}" ]]; then
+  RESOLVED_SHELF_LAYER="${SHELF_LAYER}"
+fi
+if [[ -n "${RESOLVED_SHELF_LAYER}" ]]; then
+  EXTRA_ARGS="${EXTRA_ARGS} --shelf-layer-lift-mm '${RESOLVED_SHELF_LAYER}'"
 fi
 if [[ -n "${TARGET_PRODUCT}" ]]; then
   EXTRA_ARGS="${EXTRA_ARGS} --target-product '${TARGET_PRODUCT}'"

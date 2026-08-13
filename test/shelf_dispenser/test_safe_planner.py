@@ -828,7 +828,7 @@ def test_g2_same_state_fk_replay_accepts_start_and_home_without_relaxing_guard()
         -18.613000869750977,
         -61.233001708984375,
     ]
-    home_joints = list(safety.home_joints_deg)
+    home_joints = list(safety.taught_rest_joints_deg)
     endpoint_joints = [
         7.820853900536894,
         113.98483114074917,

@@ -180,7 +180,7 @@ def main() -> int:
         demo.initialize()
         if cli.target == "carry_home":
             # The post-pick carry pose is the operator's locked start pose, not
-            # profile.home_joints_deg -- that home belongs to the side-table
+            # the old table_demo home -- deleted 2026-08-12; that home belonged
             # delivery flow, which requires the shelf and table profiles to
             # share it, and it was taught for a different task entirely.
             carry = profile.grasp_start_right_joints_deg

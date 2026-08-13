@@ -36,14 +36,18 @@ def test_walk_descends_into_lists_of_boxes_but_not_numeric_triples():
     assert leaves["table_roi.min"] == [0.1, 0.2, 0.3]
 
 
-def test_the_shipped_template_is_reported_incomplete(capsys):
-    """The tripwire: as long as the side table is closed, this must exit 1."""
-    assert status.main() == 1
+def test_the_shipped_template_is_reported_complete(capsys):
+    """Was the tripwire for "still closed"; now guards the filled profile.
+
+    Exit 0 only when nothing is null and every confirmation flag is true, so
+    this still fails the moment someone adds a field to side_table_delivery
+    and forgets to fill it -- which is the failure the checker exists for.
+    """
+    assert status.main() == 0
     out = capsys.readouterr().out
-    assert "enabled: False" in out
-    # A false confirmation flag is a gap even though it is not null.
-    assert "rotation_sweep.positive.verified" in out
-    assert "table_roi.min" in out
+    assert "enabled: True" in out
+    assert "还缺 0 项" in out
+    assert "rotation_sweep.positive.verified = True" in out
 
 
 def test_measured_values_already_in_the_profile_read_as_filled(capsys):
