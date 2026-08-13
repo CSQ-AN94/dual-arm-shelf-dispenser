@@ -144,7 +144,8 @@ data/
 secrets/
 keys/
 certificates/
-CLAUDE.md
+# CLAUDE.md 不在这里：它是项目规则，要跟着仓库走（2026-08-13）。
+# 它被忽略期间，新会话拿不到「主线是哪条」这类规则，只能靠人记得去读文档。
 .claude/
 docs/
 
