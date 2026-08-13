@@ -125,7 +125,37 @@ print(\"结果\", lift.move_to(250, speed=30))
 
 ⚠️ **降之前必须确认右臂在收拢位**（先跑 B.1 第一条），否则臂可能挂在货架里被拖下去。
 
-### B.5 回放一条示教轨迹
+### B.5 头部基准角（检查 / 复位）
+
+**整条抓取主线的定位只靠这个固定头部相机**，头一动这一轮的三维点就全错，
+所以采集前会校验、不在基准角直接拒绝，而且**不会自动去转它**。
+
+```bash
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 120 /home/rm/miniconda3/envs/tube_vision/bin/python3 scripts/head_position_lock.py check 2>&1 | tail -5'
+```
+
+不在基准角时复位（绝对位置命令 + 闭环复核）：
+
+```bash
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 200 /home/rm/miniconda3/envs/tube_vision/bin/python3 scripts/head_position_lock.py restore 2>&1 | tail -6'
+```
+
+**基准值**（`shelf_dispenser/head_lock.py`，2026-07-08 标定实测）：
+
+| | 值 | 含义 |
+|---|---|---|
+| `angle1` | **398** | 俯仰，最低位 |
+| `angle2` | **516** | 偏航，居中 |
+| 容差 | ±5 | 舵机反馈本身有几个单位抖动 |
+
+⚠️ 两条光看数字不会知道的：
+
+- 厂商服务把 `angle1` 的**命令**下限卡在 400，而**反馈**在机械限位附近是 398±几
+- **厂商方向键固定 50 步长，到不了 `angle2=516`** —— 不要用方向键去凑，只能用上面的 `restore`
+- 这台机器的 **pitch 舵机（ID=1）有已知问题**：相机上下动不了、只能左右动，
+  所以 `angle1` 实际就停在机械限位上
+
+### B.6 回放一条示教轨迹
 
 **先干跑**（检查围栏、路点数、起点对不对得上，不动）：
 

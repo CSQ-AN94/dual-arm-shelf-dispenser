@@ -37,7 +37,36 @@ README，两边都对但互相看不见。当时的症状是"测试数从 734 �
 
 看到测试数、文件或行为莫名其妙变化时，**先怀疑分支，再怀疑代码**。
 
-## 3. 代码在机器人上跑，Mac 上跑不了臂
+## 3. 头部有一个固定基准角，任务全程不许动它
+
+```python
+HEAD_REFERENCE = {"angle1": 398, "angle2": 516}   # 俯仰最低、偏航居中
+TOLERANCE = 5
+```
+
+（`shelf_dispenser/head_lock.py`，2026-07-08 标定会话实测。）
+
+**整条抓取主线的定位全靠这个固定头部相机**，所以头一动，这一轮采集的所有
+三维点就都错了。`capture_mtc_direct_pick_scene.py` 会在采集前校验，
+不在基准角就直接拒绝、并且**不会自动去转它**。
+
+两条光看数字不会知道的坑：
+
+- 厂商服务把 `angle1` 的命令下限卡在 **400**，而反馈在机械限位附近读到的是 **398±几**
+- **厂商方向键固定 50 步长，到不了 `angle2=516`** —— 只能用绝对位置命令，
+  也就是 `scripts/head_position_lock.py restore`，不要用方向键去凑
+
+检查 / 复位：
+
+```bash
+python3 scripts/head_position_lock.py check      # 只读
+python3 scripts/head_position_lock.py restore    # 绝对位置命令 + 闭环复核
+```
+
+⚠️ 这台机器的 **pitch 舵机（ID=1）有已知问题**，相机上下动不了、只能左右动。
+所以 `angle1` 实际上就停在机械限位上，别指望调它。
+
+## 4. 代码在机器人上跑，Mac 上跑不了臂
 
 改完必须先推，否则机器人跑的还是旧代码：
 
@@ -51,12 +80,12 @@ python scripts/robot_code_drift.py --push
 - **C++ 改过必须重新编译**，不编译不生效：
   `colcon build --packages-select grabber_mtc_planner`
 
-## 4. 遥操全程关闭
+## 5. 遥操全程关闭
 
 **永远不要**恢复遥操，不要跑 `upstart_all.sh`，不要重启 `atom` / `zhixing_ctrl.py`。
 这是这个项目的硬约束。
 
-## 5. 数值必须带证据，确认位不许顺手翻
+## 6. 数值必须带证据，确认位不许顺手翻
 
 安全相关的常量带 `evidence_id`，指向测出它的那次运行。
 
@@ -66,21 +95,21 @@ python scripts/robot_code_drift.py --push
 未实测的值要在文档里写明"这是手输的"。当前的例子是侧桌投放的净空参数，
 见 [`docs/side_table_delivery_state_20260812.md`](docs/side_table_delivery_state_20260812.md)。
 
-## 6. 不要制造第二份副本
+## 7. 不要制造第二份副本
 
 这个仓库在"同一个量算了两遍"上栽过两次（一次是双 home，一次是行位映射）。
 
 需要一个已经存在的量时，**调用产生它的那个函数**，不要重新推导。
 例如行位→槽位必须走 `apply_demonstrated_grasp_to_scenario.select_row_candidate`。
 
-## 7. 判断成败看证据文件，不看日志最后一行
+## 8. 判断成败看证据文件，不看日志最后一行
 
 抓取成功的判据是 `CYCLE_OUT/pick_record.json` **存在**。
 
 2026-08-11 有一次执行已经成功、记录已落盘，但脚本被中断、横幅没打出来，
 被误判成失败，接着又白跑了两轮。
 
-## 8. 中止是常态，不是异常
+## 9. 中止是常态，不是异常
 
 安全链设计成 fail-closed：执行审计会否掉九成的规划解（成功那几轮也只活下来 2~6 条），
 围栏和控制器队列上限会在下发运动**之前**拒绝。
@@ -89,7 +118,7 @@ python scripts/robot_code_drift.py --push
 有完整解但全被否 = 审计拒了（看 `pp*.log` 的 `rejecting ... solution:` 哪几项 `false`）；
 零完整解 = 规划没解出来（看 `earliest_failure_stage_by_arm`）。
 
-## 9. 上机之前
+## 10. 上机之前
 
 操作手册是 **[`docs/RUNBOOK.md`](docs/RUNBOOK.md)** —— 开机三条、复现抓取、
 跨层搜索、整套流程的推进顺序和验收标准，都在里面。
@@ -97,7 +126,7 @@ python scripts/robot_code_drift.py --push
 **先量，再下结论。** 这个项目里绝大多数"看起来像 A 的问题"最后都是 B，
 而每次都是靠日志和产物定位的，不是靠推理。
 
-## 10. 测试
+## 11. 测试
 
 ```bash
 python -m pytest test/ mtc_ws/src/grabber_mtc_planner/test -q
