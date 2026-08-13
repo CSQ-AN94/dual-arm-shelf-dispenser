@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/MoveIt_2-MTC-2F80ED?style=flat-square" alt="MoveIt 2 and MTC">
   <img src="https://img.shields.io/badge/Python-3.10-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10">
   <img src="https://img.shields.io/badge/C++-17-00599C?style=flat-square&logo=cplusplus&logoColor=white" alt="C++17">
-  <img src="https://img.shields.io/badge/Offline_Tests-675_passed-2EA44F?style=flat-square" alt="675 offline tests passed">
+  <img src="https://img.shields.io/badge/Offline_Tests-715_passed-2EA44F?style=flat-square" alt="715 offline tests passed">
   <img src="https://img.shields.io/badge/Platform-Real_Hardware-F2994A?style=flat-square" alt="Real hardware">
 </p>
 
@@ -157,26 +157,30 @@ dual-arm-shelf-dispenser/
 测试不连接机器人、ROS 或相机：
 
 ```bash
-python3 -m pytest test/ -q
+python3 -m pytest test/ mtc_ws/src/grabber_mtc_planner/test -q
 python3 scripts/architecture_report.py
 ```
 
-当前主分支结果：
+当前分支结果：
 
 ```text
-675 passed
+715 passed        # 675 (test/) + 40 (MTC planner 源码契约测试)
 33 Python modules / no package import cycles
 ```
+
+MTC planner 的契约测试直接读 C++ 源码，用来锁住"只规划、不执行"这条边界，
+所以它们和 Python 测试一起跑，不需要 ROS 或编译产物。
 
 ### 真机入口
 
 机器人主机需要 Ubuntu 22.04、ROS 2 Humble、构建后的 `mtc_ws`、RealMan SDK、RealSense 和对应现场标定。完整上层抓取到下层放置入口为：
 
 ```bash
-PRODUCT_CODE=P01 bash scripts/run_cross_layer_cycle.sh
+PRODUCT_CODE=P01 LAYER=upper PICK_ONLY=1 bash scripts/run_cross_layer_cycle.sh
 ```
 
-这不是开箱即用命令。执行前必须确认代码同步、MTC workspace 已重新编译、现场 safety profile 与标定有效，并由操作者守在急停旁。建议先阅读 [`docs/RUNBOOK_20260808.md`](docs/RUNBOOK_20260808.md)。
+这不是开箱即用命令。执行前必须确认代码同步、MTC workspace 已重新编译、现场 safety profile 与标定有效，并由操作者守在急停旁。**先读 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)**（唯一的运行手册），
+改抓取代码前另读 [`docs/GRASP_MAINLINE.md`](docs/GRASP_MAINLINE.md)（什么是主线、什么不是）。
 
 ## 设计演进
 
@@ -200,7 +204,10 @@ PRODUCT_CODE=P01 bash scripts/run_cross_layer_cycle.sh
 - [`docs/left_arm_bringup.md`](docs/left_arm_bringup.md)：左臂从 plan-only 到允许执行所需的完整证据链。
 - [`docs/rgbd_voxel_inflation.md`](docs/rgbd_voxel_inflation.md)：真实 RGB-D 体素“虚胖”如何制造假碰撞，以及如何用真机示教轨迹证伪。
 - [`docs/HANDOVER_20260808.md`](docs/HANDOVER_20260808.md)：2026-08-07 实验后的自包含交接快照。
-- [`docs/side_table_delivery_reopening.md`](docs/side_table_delivery_reopening.md)：侧桌投放为何由 profile 保持关闭，以及重开仍缺哪些现场量测。
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md)：唯一的运行手册 —— 开机、复现抓取、跨层搜索、整套流程的推进顺序与验收标准。
+- [`docs/GRASP_MAINLINE.md`](docs/GRASP_MAINLINE.md)：什么是抓取主线、什么不是，以及侧桌投放迁到主线的方案。**改抓取代码前必读。**
+- [`docs/why_the_place_failed_20260812.md`](docs/why_the_place_failed_20260812.md)：放置至今为何一次都没跑到，写给不在现场的人。
+- [`docs/side_table_delivery_state_20260812.md`](docs/side_table_delivery_state_20260812.md)：侧桌投放现状 —— 哪些数是实测的、哪些是手输的。
 
 ## 项目定位
 
