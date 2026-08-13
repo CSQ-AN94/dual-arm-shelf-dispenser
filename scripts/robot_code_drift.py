@@ -130,6 +130,12 @@ TRACKED = [
     "outputs/demonstrated_trajectories/place_B2_left_20260808.json",
     "outputs/demonstrated_trajectories/place_B3_right_20260808.json",
     "outputs/demonstrated_trajectories/place_B4_right_20260808.json",
+    # 2026-08-13 下层右偏中（行位 0.38）的抓取全路径示教。规划器在这一带
+    # 解不出来时它是唯一走得通的路：干跑 20 个路点、围栏 208 点全过。
+    "outputs/demonstrated_trajectories/pick_B3_right_20260813.json",
+    # 生成 row_templates.json 的锚点源。Mac 上这份曾经是空壳，而真源只在
+    # 机器人上——谁在 Mac 上跑一次 generate 就会把 122 点表清空。
+    "outputs/row_anchors.json",
 ]
 
 

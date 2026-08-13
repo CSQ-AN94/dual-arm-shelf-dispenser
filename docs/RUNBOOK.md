@@ -229,7 +229,33 @@ ssh rm@192.168.3.68 'ls -la /home/rm/pick_now/pick_record.json 2>/dev/null && ec
 所以代码里根本没有能表达"斜着进"的东西——**这需要重新示教那几个内侧点**
 （`record_demonstrated_grasp.py` + `shelf_row_template_tool.py`），不是改参数。
 
-**在示教之前，把瓶子放在 0.45~0.55。**
+### 下层 0.32~0.40：用示教回放，不要等规划
+
+2026-08-13 同一个瓶子、同一个位置、同一时刻做的对照：
+
+| | 结果 |
+|---|---|
+| 自动规划（美年达，行位 0.40） | ❌ **22 条完整解全被否**，自由段绕 917~3370° |
+| 回放示教路径 | ✅ **抓到了**（`state=3 pos=340 current=98`） |
+
+失败的三个数据点是 **0.32 / 0.34 / 0.40**，成功过的是 **0.56**。
+失败全部发生在自由段 `connect_to_source_pregrasp`（直线撞 → 只剩采样 → 绕几千度
+→ 切成 15° 一段要 61~225 条指令，队列上限 29），**跟抓取姿态无关**。
+
+**这一带现在的做法**（正反两向都真机验证过）：
+
+```bash
+# 1. 右臂归位到收拢位（回放的起点），升降 250，右爪张开
+# 2. 正向回放到抓取位
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 500 /home/rm/miniconda3/envs/tube_vision/bin/python3 scripts/replay_demonstrated_trajectory.py outputs/demonstrated_trajectories/pick_B3_right_20260813.json --speed 10 --execute 2>&1 | tail -6'
+# 3. 闭合夹爪（B.3），确认 state=3 且 pos 远高于空夹基线
+# 4. 要放回去就张开夹爪，再加 --reverse 原路退回
+```
+
+⚠️ **回放只查电子围栏、不查实时碰撞场景**。示教之后货架上别的瓶子挪过位置，
+这条旧路径可能会扫到它们 —— **每次回放前先看一眼货架实物**。
+
+**在这一段的规划修好之前，把瓶子放在 0.45~0.55 是最省事的做法。**
 
 ---
 
