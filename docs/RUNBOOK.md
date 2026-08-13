@@ -55,12 +55,101 @@ for arm in (\"right_arm\",\"left_arm\"):
 
 ---
 
-## B. 复现昨天的抓取结果
+## B. 零件命令（随时可单独跑，互不依赖）
+
+日常最常用的就是这一节。**每条都能单独跑**，不需要先跑别的。
+
+### B.1 右臂归位
+
+**不动升降**（快，1 秒启动）：
+
+```bash
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 300 /home/rm/miniconda3/envs/tube_vision/bin/python3 scripts/normalize_right_arm.py --skip-lift --speed 20 --execute 2>&1 | tail -2'
+```
+
+**连升降一起归到 647**：
+
+```bash
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 300 /home/rm/miniconda3/envs/tube_vision/bin/python3 scripts/normalize_right_arm.py --speed 20 --execute 2>&1 | tail -2'
+```
+
+去掉 `--execute` 就是干跑，只报偏差不动。
+
+### B.2 左臂归位
+
+```bash
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 300 /home/rm/miniconda3/envs/tube_vision/bin/python3 scripts/normalize_left_arm.py --execute 2>&1 | tail -2'
+```
+
+### B.3 夹爪开合（两条臂都支持）
+
+**张开**：
+
+```bash
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 200 /home/rm/miniconda3/envs/tube_vision/bin/python3 scripts/shelf_row_template_tool.py open-gripper --arm right_arm 2>&1 | tail -2'
+```
+
+**收拢**（只合爪，不判定有没有抓到，不动关节）：
+
+```bash
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 200 /home/rm/miniconda3/envs/tube_vision/bin/python3 scripts/shelf_row_template_tool.py close-gripper --arm right_arm 2>&1 | tail -2'
+```
+
+把 `right_arm` 换成 `left_arm` 就是左臂。
+
+**完整抓取测试**（张开 → 合拢 → 判定抓没抓到）：
+
+```bash
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 300 /home/rm/miniconda3/envs/tube_vision/bin/python3 scripts/gripper_grasp_test.py --arm right_arm 2>&1 | tail -6'
+```
+
+### B.4 升降
+
+**升到 647**：用 B.1 的第二条（归位时顺带升）。
+
+**降到 250**（直接驱动，不需要 pick 记录）：
+
+```bash
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 200 /home/rm/miniconda3/envs/tube_vision/bin/python3 -c "
+import sys; sys.path.insert(0,\".\")
+from shelf_dispenser.mobile_body import LiftSocketAdapter
+from utils.config import load_config
+cfg=load_config(\"config.yaml\")
+lift=LiftSocketAdapter(cfg.connections.left_arm_ip, cfg.connections.arm_port)
+print(\"当前\", lift.state())
+print(\"结果\", lift.move_to(250, speed=30))
+" 2>&1 | tail -3'
+```
+
+改 `250` 就是改目标高度。**速度上限 30，写更大会被拒**。
+
+⚠️ **降之前必须确认右臂在收拢位**（先跑 B.1 第一条），否则臂可能挂在货架里被拖下去。
+
+### B.5 回放一条示教轨迹
+
+**先干跑**（检查围栏、路点数、起点对不对得上，不动）：
+
+```bash
+ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 200 /home/rm/miniconda3/envs/tube_vision/bin/python3 scripts/replay_demonstrated_trajectory.py outputs/demonstrated_trajectories/right_lower_place_E_mid_20260807.json --speed 10 2>&1 | tail -8'
+```
+
+干跑通过后加 `--execute` 执行；加 `--reverse` 原路退回；
+加 `--stop-at-fraction 0.29` 只回放前一段。
+
+**干跑会检查三件事**：录制时围栏违规数、简化后路点数（上限 29）、
+**实机当前位形离示教起点差多少**（超过 2° 就拒绝）。三条都过才敢 `--execute`。
+
+⚠️ **这个脚本只查电子围栏，不查碰撞场景**。货架上瓶子换过位置之后，
+一条旧轨迹可能会扫到新摆的瓶子。**每次回放前先看一眼货架实物。**
+
+---
+
+## C. 复现昨天的抓取结果
 
 昨天（2026-08-11）四次三成：外星人上层 0.26、柠檬茶上层 0.54、阿萨姆下层 0.56。
 证据在 `outputs/runs/20260811_picks/`。
 
-### B.1 上层抓一个
+### C.1 上层抓一个
 
 把瓶子放上层，**行位靠右**（右臂舒服区 0.45~0.55），然后：
 
@@ -77,11 +166,11 @@ ssh rm@192.168.3.68 'tail -f /home/rm/pick_now.log'
 `PRODUCT_CODE` 对照：`P01` 外星人、`P02` 维他命水、`P03` 阿萨姆、
 `P04` 维他柠檬茶、`P05` 百事、`P06` 美年达。
 
-### B.2 下层抓一个
+### C.2 下层抓一个
 
 把 `LAYER=upper` 改成 `LAYER=lower`。它会先归位到 647、再空手降到 250 再抓。
 
-### B.3 判成败
+### C.3 判成败
 
 **看 `pick_record.json` 在不在，不要只看日志最后一行。**
 （2026-08-11 有一次执行成功了但脚本被中断，横幅没打出来，被误判成失败。）
@@ -90,7 +179,7 @@ ssh rm@192.168.3.68 'tail -f /home/rm/pick_now.log'
 ssh rm@192.168.3.68 'ls -la /home/rm/pick_now/pick_record.json 2>/dev/null && echo "抓取成功" || echo "没抓到"'
 ```
 
-### B.4 已知的位置限制
+### C.4 已知的位置限制
 
 **下层行位 0.32~0.34 抓不了**（维他命水、美年达都栽在这），
 原因是关节直线路线在那个位置会撞，只剩随机采样，出来的路 900~3500°，
@@ -114,7 +203,7 @@ ssh rm@192.168.3.68 'ls -la /home/rm/pick_now/pick_record.json 2>/dev/null && ec
 
 ---
 
-## C. 跨层搜索（新功能，2026-08-12 首次真机验证通过）
+## D. 跨层搜索（新功能，2026-08-12 首次真机验证通过）
 
 不知道东西在哪一层时，让它自己找：
 
@@ -131,14 +220,16 @@ ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 420 /home/r
 `0` 个但检测有命中算故障（深度坏了）；`3~6` 个仍算故障（足够多的帧认同却定不下来）。
 分界 3 来自共识判据自己的下限。
 
-**它现在还没接进抓取主线** —— 主线里仍然是手写 `LAYER=upper|lower`。
-接法见 [`GRASP_MAINLINE.md`](GRASP_MAINLINE.md) §2.1。
+**主线已经内建了逐层扫描**：`PICK_ONLY=1` 时 `LAYER` 默认就是 `auto`，
+`run_cross_layer_cycle.sh` 自己按 upper → lower 逐层空载升降 + 头部检测，
+不调这个独立脚本、也不依赖投放 profile 的高度表。上面这条命令用于
+**单独验证搜索本身**（不抓取），或者需要先知道东西在哪一层再决定怎么做。
 
 ---
 
-## D. 整套流程：现在到哪了，接下来按什么顺序
+## E. 整套流程：现在到哪了，接下来按什么顺序
 
-### D.1 现状一张表
+### E.1 现状一张表
 
 | 环节 | 状态 | 证据 |
 |---|---|---|
@@ -148,17 +239,16 @@ ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 420 /home/r
 | 收臂 | ✅ 稳定 | 同上 |
 | 库存数据库 | ⬜ 写好，**零调用者** | `inventory.py` |
 | 放回下层货架 | ❌ **自主放置 0 成功** | 最后一个卡点已修，未验证 |
-| 侧桌投放（转身放桌上） | ❌ **代码通了，零真机** | 见 §D.3 |
+| 侧桌投放（转身放桌上） | ❌ **代码通了，零真机** | 见 §E.3 |
 
-### D.2 推荐顺序（每步都能独立验收）
+### E.2 推荐顺序（每步都能独立验收）
 
-**第 1 步：示教下层内侧行位的斜向抓取**（B.4）
+**第 1 步：示教下层内侧行位的斜向抓取**（C.4）
 不是改代码——示教库里一个斜向抓取都没有。要在 0.30~0.36 那一带按你手动成功的角度
 录几个点，进行模板。验收：现在 0.32 必失败，示教之后该成功。
 
-**第 2 步：把跨层搜索接进主线**（`LAYER=auto`）
-验收：`PRODUCT_CODE=P06 LAYER=auto` 能自己找到层并抓到。
-一个接口毛刺：搜索高度表读的是 `side_table_template`，货架抓取不该依赖投放 profile。
+**第 2 步：验证主线自带的 `LAYER=auto`**（已接线，未真机跑过整条）
+验收：`PRODUCT_CODE=P06 PICK_ONLY=1` 不指定 LAYER，能自己找到层并抓到。
 
 **第 3 步：接库存**（三处，见 `GRASP_MAINLINE.md` §2.2）
 验收：扫一层之后 `inventory.json` 里有那层每个槽位的内容；
@@ -172,7 +262,7 @@ ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 420 /home/r
 2. 空手转过去后，只跑桌面观测干跑，看 ROI 里能不能找出候选
 3. 前两段都过了，再带瓶跑全程
 
-### D.3 侧桌投放必须知道的三件事
+### E.3 侧桌投放必须知道的三件事
 
 1. **旧管线已于 2026-08-12 停用**，`run_task.sh` 直接运行会拒绝并指向主线。
    迁移方案（哪些能力已经在库里、只有落桌伺服要搬）见
@@ -183,9 +273,9 @@ ssh rm@192.168.3.68 'cd /home/rm/dual-arm-shelf-dispenser && timeout 420 /home/r
 
 ---
 
-## E. 出问题先看这三条
+## F. 出问题先看这三条
 
-### E.1 头部相机掉线
+### F.1 头部相机掉线
 
 报 `未找到 RealSense 153122071777`。2026-08-08 出现三次，**整机重启无效**。
 先换 USB 口。跑之前可以先确认：
@@ -199,12 +289,12 @@ for d in rs.context().query_devices(): print(d.get_info(rs.camera_info.name), d.
 
 看到 `153122071777` 才是好的。
 
-### E.2 关节报 0xF000（通信丢帧）
+### F.2 关节报 0xF000（通信丢帧）
 
 **拖动示教之后很常见**（按住绿色拖动按钮会把这个标志锁住）。
 预检会自动尝试清除，一般不用管；拦住了就重跑一次。
 
-### E.3 抓取"未解出"
+### F.3 抓取"未解出"
 
 看 `p*.json` 里的 `complete_solution_count_by_arm`：
 
@@ -215,7 +305,7 @@ for d in rs.context().query_devices(): print(d.get_info(rs.camera_info.name), d.
 
 ---
 
-## F. 相关文档
+## G. 相关文档
 
 | 文档 | 什么时候看 |
 |---|---|
