@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1280" viewBox="0 0 1680 1280" role="img" aria-labelledby="title desc">
   <title id="title">dual-arm-shelf-dispenser 项目整体结构图</title>
-  <desc id="desc">展示跨层抓放主事务、Python shelf_dispenser 模块分层、ROS 2 与 MoveIt Task Constructor 只规划边界、真实双臂与升降硬件，以及贯穿规划和执行的安全门禁与运行证据。</desc>
+  <desc id="desc">展示货架抓取、跨层升降与桌面放置流程，Python shelf_dispenser 模块分层，ROS 2 与 MoveIt 只规划边界，真实双臂与升降硬件，以及贯穿规划和执行的安全门禁与运行证据。</desc>
 
   <defs>
     <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
@@ -47,7 +47,7 @@
   <rect x="30" y="28" width="1620" height="1224" rx="8" fill="none" stroke="#AEBBC5" stroke-width="1.2"/>
 
   <g class="font">
-    <text x="60" y="70" class="meta">PROJECT ARCHITECTURE · VERIFIED FROM CODE · 2026-08-05</text>
+    <text x="60" y="70" class="meta">PROJECT ARCHITECTURE · VERIFIED FROM CODE · 2026-08-13</text>
     <text x="60" y="111" class="title">dual-arm-shelf-dispenser 项目整体结构</text>
     <text x="60" y="139" class="subtitle">新鲜感知 → MTC 只规划 → 独立门禁执行 → 跨层升降 → 重新感知与放置</text>
     <g transform="translate(1160 48)">
@@ -56,7 +56,7 @@
       <text x="0" y="39" class="meta">COMPUTE</text>
       <text x="0" y="59" class="module-note">Jetson AGX Orin · ROS 2 Humble</text>
       <text x="0" y="78" class="meta">STATUS</text>
-      <text x="0" y="98" class="module-note">真实抓取已成功；完整跨层循环尚未完成</text>
+      <text x="0" y="98" class="module-note">抓取、跨层升降、桌面放置均已真机成功</text>
     </g>
     <line x1="60" y1="160" x2="1620" y2="160" stroke="#9EADB8"/>
   </g>
@@ -67,7 +67,7 @@
     <rect x="60" y="184" width="1560" height="38" fill="#E9EEF2"/>
     <rect x="74" y="192" width="24" height="22" rx="3" fill="#294454"/>
     <text x="86" y="208" text-anchor="middle" class="lane-id">A</text>
-    <text x="110" y="209" class="lane-name">真实跨层事务 / LIVE CROSS-LAYER TRANSACTION</text>
+    <text x="110" y="209" class="lane-name">真实任务链 / LIVE HARDWARE PIPELINE</text>
 
     <rect x="84" y="248" width="236" height="96" rx="4" class="module"/>
     <text x="100" y="276" class="module-title">工作流入口</text>
@@ -82,8 +82,8 @@
     <text x="376" y="337" class="code">scenario.yaml</text>
 
     <rect x="620" y="248" width="206" height="96" rx="4" class="module-blue"/>
-    <text x="636" y="276" class="module-title">MTC 只规划</text>
-    <text x="636" y="299" class="module-note">pick / place 分段轨迹</text>
+    <text x="636" y="276" class="module-title">MoveIt / MTC 只规划</text>
+    <text x="636" y="299" class="module-note">抓取 / 转移分段轨迹</text>
     <text x="636" y="319" class="module-note">不启动控制器、不执行</text>
     <text x="636" y="337" class="code">result + trajectory</text>
 
@@ -92,7 +92,7 @@
     <text x="882" y="291" class="safety-note">绑定场景 / 结果 / 轨迹 / 实时起点</text>
     <text x="882" y="311" class="safety-note">密集 TCP 围栏 · 夹爪反馈 · 左臂漂移</text>
     <line x1="882" y1="323" x2="1090" y2="323" stroke="#D9C3A4"/>
-    <text x="882" y="343" class="code">execute_mtc_trajectory.py</text>
+    <text x="882" y="343" class="code">Python execution gates</text>
 
     <rect x="1146" y="248" width="176" height="96" rx="4" class="module"/>
     <text x="1162" y="276" class="module-title">持瓶升降</text>
@@ -101,10 +101,10 @@
     <text x="1162" y="337" class="code">lift_execution.json</text>
 
     <rect x="1362" y="248" width="230" height="96" rx="4" class="module-blue"/>
-    <text x="1378" y="276" class="module-title">下层重采样并放置</text>
-    <text x="1378" y="299" class="module-note">空位 → place 场景</text>
-    <text x="1378" y="319" class="module-note">再次 MTC 规划 + 门禁执行</text>
-    <text x="1378" y="337" class="small">不复用抓取前的旧场景</text>
+    <text x="1378" y="276" class="module-title">输出区重采样与放置</text>
+    <text x="1378" y="299" class="module-note">桌面拟合 · 空位筛选</text>
+    <text x="1378" y="319" class="module-note">MoveIt 规划 · 分步下降</text>
+    <text x="1378" y="337" class="small">松爪 · 退开 · 三维确认</text>
 
     <path d="M320 296H360" class="line-blue"/>
     <path d="M580 296H620" class="line-blue"/>
@@ -253,7 +253,7 @@
 
     <rect x="952" y="1093" width="284" height="102" rx="4" class="module"/>
     <text x="968" y="1121" class="module-title">物理场景</text>
-    <text x="968" y="1144" class="module-note">货架层板 · 瓶子 · 非目标障碍 · 空位</text>
+    <text x="968" y="1144" class="module-note">货架 · 输出桌面 · 瓶子 · 非目标障碍</text>
     <text x="968" y="1165" class="module-note">所有场景声明由新鲜采集或实测配置产生</text>
     <text x="968" y="1186" class="small">未知几何不推断为已验证净空</text>
 
@@ -281,7 +281,7 @@
     <text x="336" y="1252" class="small">测量反馈 / 新鲜度</text>
     <path d="M522 1247H562" class="line-safety"/>
     <text x="572" y="1252" class="small">独立门禁 / 凭证</text>
-    <text x="800" y="1252" class="small">OFFLINE: test/ 无硬件测试 · scripts/mujoco_* 仅回放/仿真</text>
+    <text x="800" y="1252" class="small">OFFLINE: test/ 无硬件契约测试 · 轨迹 / 场景回放</text>
     <text x="1598" y="1252" text-anchor="end" class="meta">CANONICAL: EDITABLE SVG</text>
   </g>
 </svg>
