@@ -198,22 +198,3 @@ PRODUCT_CODE=P01 LAYER=upper PICK_ONLY=1 bash scripts/run_cross_layer_cycle.sh
 ## 项目总结
 
 项目于 2026-08-13 完结。最终成果覆盖六类饮料视觉识别、RGB-D 三维场景构建、右臂双层货架抓取、持瓶收臂、跨层升降、在线解算桌面放置、双臂碰撞建模，以及从规划到执行的安全审计与证据记录。仓库保留为个人机器人项目经历和真机实验记录。
-
-## 深入阅读
-
-- [`docs/rgbd_voxel_inflation.md`](docs/rgbd_voxel_inflation.md)：真实 RGB-D 体素“虚胖”如何制造假碰撞，以及如何用真机示教轨迹证伪。
-- [`docs/HANDOVER_20260808.md`](docs/HANDOVER_20260808.md)：2026-08-07 实验后的自包含交接快照。
-- [`docs/RUNBOOK.md`](docs/RUNBOOK.md)：唯一的运行手册 —— 开机、复现抓取、跨层搜索、整套流程的推进顺序与验收标准。
-- [`docs/GRASP_MAINLINE.md`](docs/GRASP_MAINLINE.md)：什么是抓取主线、什么不是，以及侧桌投放迁到主线的方案。**改抓取代码前必读。**
-
-## 项目定位
-
-这是一个**个人作品集与研究型机器人项目**，重点展示真实硬件上的感知—规划—执行闭环、安全边界、故障复现和工程决策。项目已经按上述真机成果完结，仓库用于展示个人工程经历并保留可复现的实验记录。
-
-项目作者：**Siqi Cai（CSQ-AN94）**<br>
-AI 编程协作：Claude（Anthropic）、Codex（OpenAI）
-
-相关仓库：
-
-- [realman-dual-arm-robot](https://github.com/CSQ-AN94/realman-dual-arm-robot)：双臂平台、硬件操作与 SDK 教学材料。
-- [vision-guided-bottle-grasp](https://github.com/CSQ-AN94/vision-guided-bottle-grasp)：本项目演进自的桌面单瓶视觉抓取验证。
