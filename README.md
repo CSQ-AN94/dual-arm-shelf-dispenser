@@ -175,12 +175,6 @@ dual-arm-shelf-dispenser/
 └── reports/                       # 视觉模型评估报告与检测示例
 ```
 
-交接建议先读 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，再对照
-[`scripts/run_cross_layer_cycle.sh`](scripts/run_cross_layer_cycle.sh) 讲一轮抓取。
-MTC 规划核心是 [`plan_shelf_transfer.cpp`](mtc_ws/src/grabber_mtc_planner/src/plan_shelf_transfer.cpp)，
-执行核心是 [`shelf_dispenser/mtc_execution.py`](shelf_dispenser/mtc_execution.py)。
-底盘部分提供原地转向和升降协同，不代表仓库包含完整自主导航系统。
-
 ## 运行与测试
 
 ### 离线测试
