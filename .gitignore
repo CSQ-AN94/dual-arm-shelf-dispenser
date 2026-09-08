@@ -167,3 +167,6 @@ exports/*.zip
 
 # Ultralytics scratch output
 runs/
+
+# Local handover speaking notes
+/docs/HANDOVER_WALKTHROUGH.md

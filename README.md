@@ -129,28 +129,57 @@ Python 独立复核并执行右臂轨迹
 
 仓库把安全边界直接写进配置和产物，而不是只写在 README：标定来源、场景版本、执行资格和硬件反馈都会随规划与执行记录保存，供后续审计和离线复现。
 
-## 项目结构
+## 仓库结构
+
+下面列出交接时需要认识的主要目录与文件；不是完整文件清单。
 
 ```text
 dual-arm-shelf-dispenser/
-├── shelf_dispenser/                 # Python 核心库
-│   ├── orchestrator.py              # 单轮硬件、场景与规划状态
-│   ├── arm.py / arm_worker.py       # RealMan 控制、轨迹审计、双臂进程隔离
-│   ├── safety.py                    # 电子围栏、标定来源与执行门禁
-│   ├── scene.py / perception.py     # RGB-D 世界模型与目标感知
-│   ├── mtc_pick_contract.py         # MTC 场景/结果/轨迹执行契约
-│   ├── mtc_execution.py             # 显式 pick/place 执行层
-│   └── ros/                         # 由系统 Python 独立运行的 ROS 2 入口
-├── mtc_ws/src/
-│   ├── grabber_mtc_planner/         # C++17 MoveIt Task Constructor planner
-│   └── grabber_robot_state_bridge/  # 双臂 + 升降实时只读状态桥
-├── scripts/                         # 每个流水线阶段一个可审计入口
-├── test/                            # 无机器人、无 ROS、无相机即可运行的测试
-├── docs/                            # 真机交接、故障分析与标定说明
-└── reports/                         # 视觉模型评估与示例
+├── README.md                        # 项目概览、能力边界与代码地图
+├── config.yaml                      # 设备连接与运行配置，接手时核对现场值
+├── requirements.txt                 # Python 依赖
+├── shelf_dispenser/                 # 感知、规划适配、安全检查与执行核心
+│   ├── perception.py                # 商品检测与 RGB-D 目标定位
+│   ├── scene.py                     # 点云处理、体素化与碰撞场景
+│   ├── shelf_model.py               # 货架几何模型
+│   ├── table_model.py               # 桌面几何拟合
+│   ├── delivery_table.py            # 输出桌面分析与放置候选
+│   ├── mtc_pick_contract.py         # 场景、轨迹、结果与执行凭证校验
+│   ├── mtc_execution.py             # MTC pick/place 轨迹的实际执行
+│   ├── arm.py / arm_worker.py       # RealMan SDK、轨迹审计与双臂进程隔离
+│   ├── safety.py                    # 电子围栏与安全配置校验
+│   ├── safety_profiles.json         # 现场标定、工作空间和任务安全参数
+│   ├── mobile_body.py              # 底盘状态、相对转向、升降与返程协调
+│   ├── planner.py / safe_planner.py # MoveIt 进程适配与运动复核
+│   ├── workflows.py                # Python 任务阶段编排
+│   ├── orchestrator.py             # 硬件、感知与任务操作；也包含历史路径
+│   ├── model_assets.lock.json      # 检测模型版本与校验信息
+│   └── ros/                        # ROS 侧规划、碰撞检查等独立进程入口
+├── scripts/                        # 任务启动器、单步执行与现场工具
+│   ├── run_cross_layer_cycle.sh    # 货架抓取主线：归位、感知、规划、执行
+│   ├── capture_mtc_direct_pick_scene.py # 固定头部相机采集抓取场景
+│   ├── apply_demonstrated_grasp_to_scenario.py # 用行位示教选择抓取先验
+│   ├── execute_mtc_trajectory.py   # 校验并显式执行 pick/place
+│   ├── execute_mtc_lift_transfer.py # 持瓶跨层升降与证据记录
+│   ├── run_pick_place_task.py      # Python 任务接口，交接时按主线核对使用方式
+│   ├── woosh_rotate_relative.cpp  # Woosh 底盘闭环原地旋转工具，需编译
+│   └── robot_code_drift.py         # 开发机与机器人代码同步、差异核对
+├── mtc_ws/src/                     # ROS 2 工作空间源码
+│   ├── grabber_mtc_planner/        # C++ MoveIt Task Constructor 抓取/放置规划
+│   └── grabber_robot_state_bridge/ # 实时双臂与升降状态桥、只规划启动配置
+├── sensors/                       # 相机等传感器接入
+├── utils/                         # 配置读取等公共工具
+├── intelligence/                  # 视觉模型相关资源；以模型锁文件核验资产
+├── test/                          # Python 离线测试
+├── docs/                          # 运行手册与真机实验记录
+└── reports/                       # 视觉模型评估报告与检测示例
 ```
 
-当前真实货架循环入口是 [`scripts/run_cross_layer_cycle.sh`](scripts/run_cross_layer_cycle.sh)，MTC 核心在 [`plan_shelf_transfer.cpp`](mtc_ws/src/grabber_mtc_planner/src/plan_shelf_transfer.cpp)，真实执行入口是 [`scripts/execute_mtc_trajectory.py`](scripts/execute_mtc_trajectory.py)。
+交接建议先读 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，再对照
+[`scripts/run_cross_layer_cycle.sh`](scripts/run_cross_layer_cycle.sh) 讲一轮抓取。
+MTC 规划核心是 [`plan_shelf_transfer.cpp`](mtc_ws/src/grabber_mtc_planner/src/plan_shelf_transfer.cpp)，
+执行核心是 [`shelf_dispenser/mtc_execution.py`](shelf_dispenser/mtc_execution.py)。
+底盘部分提供原地转向和升降协同，不代表仓库包含完整自主导航系统。
 
 ## 运行与测试
 
