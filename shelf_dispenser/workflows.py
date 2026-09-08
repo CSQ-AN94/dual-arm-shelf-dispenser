@@ -1,7 +1,7 @@
 """The supported real-robot bottle pick/place workflows.
 
 The public task interface is deliberately smaller than the legacy demo CLI:
-one operation, three explicit starting conditions, and one shared grasp/place tail.
+one operation, four explicit starting conditions, and one shared grasp/place tail.
 Historical run artefacts are evidence only; neither workflow resumes from
 saved localizations or trajectories.
 """
@@ -30,6 +30,7 @@ class StartMode(str, Enum):
     FROM_PREGRASP = "from-pregrasp"
     FROM_OBSERVATION = "from-observation"
     FROM_START = "from-start"
+    FROM_HELD = "from-held"
 
 
 class DeliverMode(str, Enum):
@@ -58,6 +59,7 @@ class TaskPhase(str, Enum):
     WRIST_LOCK = "wrist_lock"
     CONFIRM_BEFORE_GRASP = "confirm_before_grasp"
     GRASP_AND_LIFT = "grasp_and_lift"
+    HELD_RESUME = "held_resume"
     GRASP_VERIFIED = "grasp_verified"
     BODY_POSITIONING = "body_positioning"
     BODY_RETURN = "body_return"
@@ -202,6 +204,13 @@ class BottlePickPlaceTask:
                 "stop-after-observation 只支持 from-start 或 from-observation；"
                 "from-pregrasp 已越过观察位"
             )
+        if mode is StartMode.FROM_HELD:
+            if deliver_mode is not DeliverMode.DISPENSE:
+                raise SafetyAbort("from-held 只允许进入侧桌送货流程")
+            if getattr(self.demo.args, "stop_after_observation", False) or getattr(
+                self.demo.args, "confirm_before_grasp", False
+            ):
+                raise SafetyAbort("from-held 已越过观察/抓取门禁")
         environment_guard: LeftArmStabilityGuard | None = None
         shelf_ready_start = None
         try:
@@ -231,6 +240,32 @@ class BottlePickPlaceTask:
             self.demo.task_left_reference_joints_deg = (
                 environment_guard.start()
             )
+
+            if mode is StartMode.FROM_HELD:
+                self.object_state = ObjectState.UNKNOWN
+                self._record(
+                    TaskPhase.HELD_RESUME,
+                    "验证本轮 MTC 抓取证据、实时夹持反馈和收拢位并重建 held guard",
+                )
+                lifted_target = self.demo._resume_mtc_pick_for_delivery()
+                self.object_state = ObjectState.HELD
+                self._record(
+                    TaskPhase.GRASP_VERIFIED,
+                    "已验证夹爪仍持瓶且右臂位于运输收拢位",
+                )
+                self._complete_dispense_tail(
+                    lifted_target,
+                    shelf_ready_start=shelf_ready_start,
+                    environment_guard=environment_guard,
+                )
+                environment_guard.close()
+                environment_guard = None
+                self.status = RunStatus.DONE
+                self._record(
+                    TaskPhase.DONE,
+                    "MTC 抓取已接入侧桌放置，释放、退开、机械臂归位和底盘返程均已完成",
+                )
+                return self._finish()
 
             self._record(TaskPhase.HEAD_LOCK, "本轮重新采集固定头部目标")
             head_target = self.demo._fresh_head_target()
@@ -372,23 +407,16 @@ class BottlePickPlaceTask:
                 "夹爪反馈通过且瓶子已完成抬升，物体状态记为 held",
             )
 
-            # Release may happen before a later retreat/vision failure, so do
-            # not claim HELD or EMPTY while this compound action is in flight.
-            self.object_state = ObjectState.UNKNOWN
             if deliver_mode is DeliverMode.DISPENSE:
-                self._record(
-                    TaskPhase.BODY_POSITIONING,
-                    "携瓶收进示教运输姿态，身体升降后底盘仅原地旋转约90°",
-                )
-                self.demo._dispense_to_side_table(
-                    lifted_target, start=shelf_ready_start
-                )
-                self.object_state = ObjectState.EMPTY
-                self._record(
-                    TaskPhase.RELEASE_VERIFIED,
-                    "瓶子已在实时点云选择的右侧桌面位置释放并完成三维确认",
+                self._complete_dispense_tail(
+                    lifted_target,
+                    shelf_ready_start=shelf_ready_start,
+                    environment_guard=environment_guard,
                 )
             else:
+                # Release may happen before a later retreat/vision failure, so
+                # do not claim HELD or EMPTY while this compound action runs.
+                self.object_state = ObjectState.UNKNOWN
                 self._record(
                     TaskPhase.PLACE_AND_RETREAT,
                     "放回锁定位置、松开夹爪、安全退开后由固定头部确认释放",
@@ -400,54 +428,15 @@ class BottlePickPlaceTask:
                     "夹爪打开、瓶子在锁定放置点得到视觉确认且机械臂已退开",
                 )
 
-            # A successful cycle must leave the right arm in the taught,
-            # head-camera-clear home posture regardless of which verified
-            # physical entry point was used.  Refresh the world after release
-            # before planning this global leg; saved approach-time geometry is
-            # stale after the bottle and arm have moved.
-            self._record(
-                TaskPhase.RETURN_HOME,
-                "释放并退开后重新采集头部障碍场景，再用同一安全规划链返回右臂初始姿态",
-            )
-            if deliver_mode is DeliverMode.DISPENSE:
+                # A successful place-back cycle leaves the right arm in the
+                # taught, head-camera-clear home posture.  Refresh the world
+                # after release before planning this global leg.
                 self._record(
-                    TaskPhase.OUTPUT_SCENE_SYNC,
-                    "释放后再次重建右侧桌面场景，再规划返回无遮挡初始姿态",
+                    TaskPhase.RETURN_HOME,
+                    "释放并退开后重新采集头部障碍场景，再用同一安全规划链返回右臂初始姿态",
                 )
-                self.demo._capture_output_table_scene(
-                    require_place_candidate=False
-                )
-            else:
                 self.demo._refresh_head_scene_for_global_motion(wrist_target)
-            self.demo._return_home()
-
-            if deliver_mode is DeliverMode.DISPENSE:
-                # A body return is categorically unavailable while HELD or
-                # UNKNOWN.  The arm has just completed its empty-profile home
-                # path, then both arm guards are checked immediately before
-                # handing this immutable authorization to the body controller.
-                right_arm_compact_or_home = bool(
-                    self.demo._right_arm_at_delivery_home()
-                )
-                environment_guard.check()
-                authorization = ReturnAuthorization(
-                    release_verified=True,
-                    object_state=self.object_state.value,
-                    right_arm_compact_or_home=right_arm_compact_or_home,
-                    left_arm_stable=True,
-                )
-                self._record(
-                    TaskPhase.BODY_RETURN,
-                    "释放已验证、物体 empty 且双臂安全，授权底盘反向回到 SHELF_READY",
-                )
-                self.demo._return_body_to_shelf_ready(
-                    start=shelf_ready_start,
-                    authorization=authorization,
-                )
-                self._record(
-                    TaskPhase.SHELF_RESTORED,
-                    "底盘/升降恢复已验证；右臂保持 compact/home",
-                )
+                self.demo._return_home()
 
             environment_guard.close()
             environment_guard = None
@@ -489,3 +478,59 @@ class BottlePickPlaceTask:
                 # failure that determines the process exit code.
                 pass
             raise
+
+    def _complete_dispense_tail(
+        self,
+        lifted_target: Any,
+        *,
+        shelf_ready_start: Any,
+        environment_guard: LeftArmStabilityGuard,
+    ) -> None:
+        """Run the one supported held-bottle side-table completion path."""
+
+        self.object_state = ObjectState.UNKNOWN
+        self._record(
+            TaskPhase.BODY_POSITIONING,
+            "携瓶收进示教运输姿态，身体升降后底盘仅原地旋转约90°",
+        )
+        self.demo._dispense_to_side_table(
+            lifted_target, start=shelf_ready_start
+        )
+        self.object_state = ObjectState.EMPTY
+        self._record(
+            TaskPhase.RELEASE_VERIFIED,
+            "瓶子已在实时点云选择的右侧桌面位置释放并完成三维确认",
+        )
+        self._record(
+            TaskPhase.RETURN_HOME,
+            "释放并退开后重建右侧桌面场景，再用同一安全规划链返回右臂初始姿态",
+        )
+        self._record(
+            TaskPhase.OUTPUT_SCENE_SYNC,
+            "释放后再次重建右侧桌面场景，再规划返回无遮挡初始姿态",
+        )
+        self.demo._capture_output_table_scene(require_place_candidate=False)
+        self.demo._return_home()
+
+        right_arm_compact_or_home = bool(
+            self.demo._right_arm_at_delivery_home()
+        )
+        environment_guard.check()
+        authorization = ReturnAuthorization(
+            release_verified=True,
+            object_state=self.object_state.value,
+            right_arm_compact_or_home=right_arm_compact_or_home,
+            left_arm_stable=True,
+        )
+        self._record(
+            TaskPhase.BODY_RETURN,
+            "释放已验证、物体 empty 且双臂安全，授权底盘反向回到 SHELF_READY",
+        )
+        self.demo._return_body_to_shelf_ready(
+            start=shelf_ready_start,
+            authorization=authorization,
+        )
+        self._record(
+            TaskPhase.SHELF_RESTORED,
+            "底盘/升降恢复已验证；右臂保持 compact/home",
+        )

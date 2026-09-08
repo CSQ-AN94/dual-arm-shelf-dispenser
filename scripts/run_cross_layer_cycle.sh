@@ -24,6 +24,8 @@ O=${CYCLE_OUT:-/home/rm/cycle}
 SPEED=${CYCLE_SPEED:-100}
 ROW_TEMPLATES=${ROW_TEMPLATES:-$G/outputs/row_templates.json}
 PRODUCT_CODE=${PRODUCT_CODE:-}
+DELIVERY_MODE=${DELIVERY_MODE:-lower_shelf}
+SIDE_TABLE_SPEED=${SIDE_TABLE_SPEED:-10}
 # Stop after the arm is back on the taught tuck pose, holding the bottle.  For
 # runs where a person takes the bottle off and resets the shelf between picks.
 PICK_ONLY=${PICK_ONLY:-0}
@@ -43,13 +45,17 @@ case "$PICK_ONLY" in
   0|1) ;;
   *) echo "拒绝: PICK_ONLY 必须是 0 或 1" >&2; exit 1 ;;
 esac
+case "$DELIVERY_MODE" in
+  lower_shelf|side_table) ;;
+  *) echo "拒绝: DELIVERY_MODE 必须是 lower_shelf 或 side_table" >&2; exit 1 ;;
+esac
 case "$LAYER" in
   upper) PICK_LIFT_MM=647 ;;
   lower) PICK_LIFT_MM=250 ;;
   auto) PICK_LIFT_MM= ;;
   *) echo "拒绝: LAYER 必须是 auto、upper 或 lower" >&2; exit 1 ;;
 esac
-[ "$PICK_ONLY" = 1 ] || [ "$LAYER" != lower ] || {
+[ "$PICK_ONLY" = 1 ] || [ "$DELIVERY_MODE" = side_table ] || [ "$LAYER" != lower ] || {
   echo "拒绝: 下层抓取之后没有更低的层可放，LAYER=lower 只支持 PICK_ONLY=1" >&2
   exit 1
 }
@@ -224,7 +230,7 @@ if [ "$LAYER" = auto ]; then
     upper) PICK_LIFT_MM=647 ;;
     lower) PICK_LIFT_MM=250 ;;
   esac
-  [ "$PICK_ONLY" = 1 ] || [ "$LAYER" = upper ] || {
+  [ "$PICK_ONLY" = 1 ] || [ "$DELIVERY_MODE" = side_table ] || [ "$LAYER" = upper ] || {
     echo "找到 $PRODUCT_CODE 在下层，但当前自动放置只验证了上层抓取 -> 下层货架。" >&2
     echo "侧桌 profile 尚未现场验证；拒绝抓起一个没有安全去处的瓶子。" >&2
     exit 1
@@ -305,6 +311,27 @@ if [ "$PICK_ONLY" = 1 ]; then
   say "抓取完成，右臂已在收拢位，升降 $PICK_LIFT_MM mm"
   echo PICK_ONLY_SUCCESS
   exit 0
+fi
+
+if [ "$DELIVERY_MODE" = side_table ]; then
+  say "阶段 3  MTC 已持瓶状态交接到侧桌放置主线"
+  cd "$G"
+  if $PY scripts/run_pick_place_task.py \
+      --execute --task-mode from-held --dispense \
+      --safety-profile shelf_template \
+      --delivery-safety-profile side_table_template \
+      --target-product "$PRODUCT_CODE" \
+      --shelf-layer-lift-mm "$PICK_LIFT_MM" \
+      --mtc-pick-execution-record "$O/pick_record.json" \
+      --commissioning-speed "$SIDE_TABLE_SPEED" \
+      --output-dir "$O/side_table_delivery" \
+      > "$O/side_table_delivery.log" 2>&1; then
+    echo "  OK"
+    echo CYCLE_SUCCESS
+    exit 0
+  else
+    fail "$O/side_table_delivery.log"
+  fi
 fi
 
 say "阶段 3  升降 647 -> 250（持瓶）——首次上硬件，人守在急停旁"

@@ -29,11 +29,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--task-mode",
-        choices=("from-pregrasp", "from-observation", "from-start"),
+        choices=("from-pregrasp", "from-observation", "from-start", "from-held"),
         help=(
             "run one supported real-robot transaction: resume at the verified "
             "pregrasp hover, start at the right-wrist observation pose, or "
-            "start with head localization"
+            "start with head localization; from-held consumes a fresh MTC "
+            "pick record and only completes side-table delivery"
         ),
     )
     parser.add_argument(
@@ -94,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=(
-            "调试/commissioning 速度上限（1-100%）；同时限制全局转移、"
+            "调试/commissioning 速度上限（1-100%%）；同时限制全局转移、"
             "局部转移和接触邻近段，未指定则保持 profile 默认速度"
         ),
     )
@@ -162,6 +163,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--mtc-pick-execution-record",
+        type=Path,
+        default=None,
+        help=(
+            "from-held only: fresh grabber.mtc_execution.v1 pick evidence "
+            "from the immediately preceding MTC grasp"
+        ),
+    )
+    parser.add_argument(
         "--chassis-rotate-helper",
         default="/home/rm/agv_debug_tools/grabber_rotate_relative",
         help="机器人端闭环原地旋转工具（只允许约90°、linear恒为0）",
@@ -214,7 +224,7 @@ def validate_args(args: argparse.Namespace) -> argparse.Namespace:
     ):
         raise SystemExit(
             "legacy phase flags are disabled; use --execute --task-mode "
-            "{from-pregrasp|from-observation|from-start}. Developers may set "
+            "{from-pregrasp|from-observation|from-start|from-held}. Developers may set "
             "BOTTLE_GRASP_ALLOW_LEGACY=1 for isolated diagnostics only."
         )
     if args.execute and args.plan_only:
@@ -290,6 +300,20 @@ def validate_args(args: argparse.Namespace) -> argparse.Namespace:
         # the caller believes it selected is how a run picks from the wrong
         # layer without anyone noticing.
         raise SystemExit("--shelf-layer-lift-mm requires --dispense")
+    if args.task_mode == "from-held":
+        if not args.dispense:
+            raise SystemExit("from-held requires --dispense")
+        if args.mtc_pick_execution_record is None:
+            raise SystemExit("from-held requires --mtc-pick-execution-record")
+        if not args.mtc_pick_execution_record.is_file():
+            raise SystemExit(
+                "--mtc-pick-execution-record does not exist: "
+                f"{args.mtc_pick_execution_record}"
+            )
+        if not args.target_product or "," in args.target_product:
+            raise SystemExit("from-held requires exactly one --target-product P01..P06")
+    elif args.mtc_pick_execution_record is not None:
+        raise SystemExit("--mtc-pick-execution-record requires --task-mode from-held")
     if args.task_mode and any(
         (
             args.plan_only,

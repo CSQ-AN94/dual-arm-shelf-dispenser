@@ -67,7 +67,11 @@ from .model_assets import (
 from .perception import BottleDetector, depth_point_for_detection
 from .relative_place import product_geometry
 from .planner import MoveItPlanner
-from .arm import ArmJointReader, RobotSession
+from .arm import (
+    ArmJointReader,
+    RobotSession,
+    validate_holding_gripper_feedback,
+)
 from .run_manifest import manifest_profile_expectations
 from .safe_planner import PlanTarget, SafeMotionPlanner, VerifiedPlan
 from .safety import FenceBox, SafetyProfile, load_safety_profile
@@ -303,6 +307,13 @@ class RunOrchestrator:
         # The catalog radius is a conservative half-width; widen it a little
         # for depth noise, but never enough to reach a neighbouring object.
         radius = float(geometry["radius_m"]) + 0.015
+        # Centre the cylinder on the bottle, not on the tool.  This grasp is
+        # horizontal: the bottle axis stands 63 mm from the TCP along the
+        # approach, further than the 49 mm cylinder is wide, so a TCP-centred
+        # cylinder contains no bottle at all.  On 2026-08-13 it duly returned
+        # a 73 mm "bottle bottom" -- the gripper, or the table edge -- against
+        # a grip the operator had measured at 120 mm.
+        centre_xy = self._planned_bottle_xy(tcp)
         floor = float(table_height_m) + 0.008
         ceiling = float(tcp[2, 3])
         depth_frames = self._collect_fresh_depth_frames(
@@ -318,12 +329,17 @@ class RunOrchestrator:
                 self.params,
                 min_depth_m=self.params.head_min_depth_m,
                 max_depth_m=self.params.head_max_depth_m,
-                bottom_crop=self.params.scene_image_bottom_crop,
+                # This is a measurement, not a collision scene, and what it
+                # measures -- the bottle's underside, a centimetre or two off
+                # a table the arm is reaching out over -- sits in the bottom
+                # rows of the head frame.  Inheriting the shelf's row limit
+                # here throws away the only pixels the servo exists to read.
+                bottom_crop=int(np.asarray(depth).shape[0]),
             )
             points = np.asarray(points, dtype=float)
             if points.ndim != 2 or points.shape[1] != 3 or not len(points):
                 continue
-            radial = np.linalg.norm(points[:, :2] - tcp[:2, 3], axis=1)
+            radial = np.linalg.norm(points[:, :2] - centre_xy, axis=1)
             inside = points[
                 (radial <= radius)
                 & (points[:, 2] >= floor)
@@ -365,7 +381,17 @@ class RunOrchestrator:
         ``_servo_bottle_onto_table``: the tool mount chain is nominal, and its
         own evidence_id forbids transferring it to a geometric grasp-point
         derivation without measuring first.
+
+        An operator who measured the grip on this particular bottle may supply
+        it directly.  ``height/2`` assumes the gripper closed at mid-body, and
+        nothing in the pick guarantees that -- the grasp point is chosen as a
+        fraction of a detection box, so the real offset is a property of that
+        grasp, not of the product.  Knowing it at pick time is the proper fix;
+        until then a supplied measurement beats a catalogue assumption.
         """
+        supplied = getattr(self, "_operator_bottle_bottom_below_tcp_m", None)
+        if supplied is not None:
+            return float(supplied)
         return (
             float(product_geometry(self._target_product_code())["height_m"])
             / 2.0
@@ -4474,6 +4500,150 @@ class RunOrchestrator:
             json.dumps(self.held_object_guard, indent=2), encoding="utf-8"
         )
 
+    def _resume_mtc_pick_for_delivery(self) -> Localization:
+        """Rebuild the held-object guard from fresh MTC execution evidence."""
+
+        path = getattr(self.args, "mtc_pick_execution_record", None)
+        try:
+            record = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
+            raise SafetyAbort(f"MTC 抓取证据无法读取: {exc}") from exc
+        completion = record.get("completion") if isinstance(record, dict) else None
+        if (
+            not isinstance(record, dict)
+            or record.get("schema_version") != "grabber.mtc_execution.v1"
+            or record.get("mode") != "pick"
+            or not isinstance(completion, dict)
+        ):
+            raise SafetyAbort("from-held 需要带 completion 的 MTC pick 执行证据")
+        try:
+            completed_at = datetime.fromisoformat(
+                str(record["completed_at_utc"]).replace("Z", "+00:00")
+            )
+            empty_close_pos = int(completion["empty_close_pos"])
+            lift_start_mm = int(completion["lift_start_mm"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SafetyAbort("MTC 抓取证据时间/空夹基线/升降高度无效") from exc
+        if completed_at.tzinfo is None:
+            raise SafetyAbort("MTC 抓取证据时间缺少时区")
+        age_s = (datetime.now(timezone.utc) - completed_at).total_seconds()
+        if age_s < -60.0 or age_s > float(self.params.scene_max_age_s):
+            raise SafetyAbort(
+                f"MTC 抓取证据不新鲜: age={age_s:.1f}s, "
+                f"limit={self.params.scene_max_age_s:.1f}s"
+            )
+
+        config = self._side_table_config()
+        if lift_start_mm != int(config.source_lift_height_mm):
+            raise SafetyAbort(
+                f"MTC 抓取层高 {lift_start_mm} mm 与当前 SHELF_READY "
+                f"{config.source_lift_height_mm} mm 不一致"
+            )
+        expected = np.asarray(config.transport_joints_deg, dtype=float)
+        current = np.asarray(self.robot.joints_deg(), dtype=float)
+        if (
+            expected.shape != (7,)
+            or current.shape != (7,)
+            or not np.all(np.isfinite(expected))
+            or not np.all(np.isfinite(current))
+            or float(np.max(np.abs(current - expected)))
+            > float(self.params.planned_start_tolerance_deg)
+        ):
+            raise SafetyAbort("实时右臂不在已验证的携瓶运输收拢位")
+        feedback = validate_holding_gripper_feedback(
+            self.robot.gripper_state(),
+            self.params,
+            empty_close_pos=empty_close_pos,
+        )
+        self.robot.empty_close_pos = empty_close_pos
+
+        # Geometry comes from the product catalog, never from the delivery
+        # profile's generic copy.  On 2026-08-13 the profile's 255 mm stood in
+        # for P01's catalogued 215 mm, which made the guard 40 mm too tall and
+        # pushed its underside 4 mm into the tabletop collision box while the
+        # bottle was still tucked 90 mm short of the real table -- so every
+        # plan was refused from an invalid start state.  There is one recorded
+        # geometry per product; this reads it.
+        geometry = product_geometry(self._target_product_code())
+        offset = np.asarray(completion.get("bottle_center_in_tcp_m"), dtype=float)
+        final_pose = np.asarray(
+            completion.get("final_tcp_base_xyz_rpy_rad"), dtype=float
+        )
+        current_tcp = np.asarray(self.robot.current_tcp(), dtype=float)
+        if (
+            offset.shape != (3,)
+            or final_pose.shape != (6,)
+            or current_tcp.shape != (4, 4)
+            or not np.all(np.isfinite(offset))
+            or not np.all(np.isfinite(final_pose))
+            or not np.all(np.isfinite(current_tcp))
+            or float(np.linalg.norm(offset)) > 0.25
+        ):
+            raise SafetyAbort("MTC 抓取证据缺少有效的瓶心/TCP 位姿")
+
+        # MTC's verified pick keeps the bottle upright through its final
+        # retreat.  Recover that bottle orientation in TCP coordinates, then
+        # carry it through the separate tuck using the live TCP transform.
+        T_tcp_bottle = np.eye(4)
+        T_tcp_bottle[:3, :3] = pose_matrix(final_pose)[:3, :3].T
+        T_tcp_bottle[:3, 3] = offset
+        T_base_bottle = current_tcp @ T_tcp_bottle
+        T_base_link7 = current_tcp @ np.linalg.inv(self.T_link7_tcp)
+        T_link7_bottle = np.linalg.inv(T_base_link7) @ T_base_bottle
+        padding = float(config.held_bottle_guard_padding_m)
+        diameter = 2.0 * float(geometry["radius_m"])
+        self.held_object_guard = {
+            "size": [
+                diameter + padding,
+                diameter + padding,
+                float(geometry["height_m"]) + padding,
+            ],
+            "center": T_link7_bottle[:3, 3].tolist(),
+            "quaternion_xyzw": Rotation.from_matrix(
+                T_link7_bottle[:3, :3]
+            ).as_quat().tolist(),
+        }
+        center = T_base_bottle[:3, 3].tolist()
+        self.held_locked_target = Localization(
+            point_camera=center,
+            point_base=center,
+            pixel=[0.0, 0.0],
+            depth_m=float(np.linalg.norm(center)),
+            depth_mad_m=0.0,
+            position_spread_m=0.0,
+            box=[0, 0, 0, 0],
+            confidence=1.0,
+            frame_count=1,
+            class_name=self._target_product_code(),
+            captured_at_utc=record["completed_at_utc"],
+        )
+        (self.run_dir / "held_bottle_guard.json").write_text(
+            json.dumps(self.held_object_guard, indent=2), encoding="utf-8"
+        )
+        (self.run_dir / "mtc_held_resume.json").write_text(
+            json.dumps(
+                {
+                    "pick_record": str(Path(path).resolve()),
+                    "pick_age_s": age_s,
+                    "lift_start_mm": lift_start_mm,
+                    "right_tuck_max_error_deg": float(
+                        np.max(np.abs(current - expected))
+                    ),
+                    "gripper_holding_feedback": feedback,
+                    "bottle_center_base_m": center,
+                    "held_object_guard": self.held_object_guard,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        self.stage(
+            "MTC 持瓶交接",
+            f"抓取证据 age={age_s:.1f}s；实时夹持与收拢位通过，held guard 已重建",
+        )
+        return self.held_locked_target
+
     def _scene_without_held_guard(
         self, voxels: Sequence[Sequence[float]]
     ) -> list[list[float]]:
@@ -4605,6 +4775,18 @@ class RunOrchestrator:
         measured = self._refresh_held_scene(lifted_target)
         config = self._side_table_config()
         joints = list(config.transport_joints_deg)
+        current = np.asarray(self.robot.joints_deg(), dtype=float)
+        if (
+            current.shape == (7,)
+            and np.all(np.isfinite(current))
+            and float(np.max(np.abs(current - np.asarray(joints, dtype=float))))
+            <= float(self.params.planned_start_tolerance_deg)
+        ):
+            self.stage(
+                "携瓶运输姿态到位",
+                "右臂已在现场示教包络；跳过零位移规划，held guard 继续生效",
+            )
+            return measured
         flange = self.robot.controller_flange_from_joints(joints)
         plan = self._plan_flange(
             "moveit_held_transport", flange, goal_joints=joints
@@ -4635,7 +4817,64 @@ class RunOrchestrator:
         depth_frames = self._collect_fresh_depth_frames(
             self.params.scene_samples, label="转向后输出桌面场景"
         )
+        # ``bottom_crop`` is a *row limit*, not a crop amount, and the 405 in
+        # DemoParams was tuned for the shelf, where the bottom rows are the
+        # robot's own body.  Here they are the near half of the table.  On
+        # 2026-08-13 the probe measured the cost of reusing it: identical
+        # frames yielded table points only at y>=0.70 cropped versus a solid
+        # surface from y=0.60 at full frame -- and y<0.70 is the only band
+        # this arm can reach, so every candidate the run could see was out of
+        # reach.  Evidence: outputs/output_table_probe/.
         point_frames = [
+            head_scene_points(
+                depth,
+                K,
+                self.T_base_head_camera,
+                self.params,
+                min_depth_m=self.params.head_min_depth_m,
+                max_depth_m=self.params.head_max_depth_m,
+                bottom_crop=int(np.asarray(depth).shape[0]),
+                # The default stride 6 sizes a collision grid; this call feeds
+                # a plane fit whose gate is a point count, and on 2026-08-13 it
+                # starved that gate (largest 5 mm bin 93 against a floor of
+                # 400) on frames that plainly contained the table.  Same
+                # frames, four times the samples, no threshold weakened.
+                stride=3,
+            )
+            for depth in depth_frames
+        ]
+        observation = observe_output_table(
+            point_frames,
+            config,
+            require_candidates=require_place_candidate,
+            # Both set by a caller holding a taught place point.  Absent,
+            # these are None and the ranking keeps its ROI-centre default
+            # while every candidate still has to be seen by the camera.
+            preferred_xy=getattr(self, "_preferred_place_xy", None),
+            vouched_candidates=getattr(
+                self, "_vouched_place_candidates", None
+            ),
+        )
+        roi_center = (
+            np.asarray(config.table_roi_min)
+            + np.asarray(config.table_roi_max)
+        ) / 2.0
+        # One capture, two consumers, and they do not want the same picture.
+        #
+        # The fit above needs the near rows, because that is where the
+        # reachable half of the table is.  The collision scene must not have
+        # them: this pipeline has no robot self-filter, and
+        # ``scene_image_bottom_crop`` has been standing in for one -- the arm
+        # appears at the bottom of the head frame.  With the shelf that costs
+        # nothing, since the arm is tucked; carrying a bottle in front of the
+        # camera it is the whole ballgame, and on 2026-08-13 feeding the full
+        # frame to the voxeliser had MoveIt reject all 24 goals with
+        # ``r_hand`` against ``rgbd_voxels`` -- the arm colliding with a point
+        # cloud of itself.
+        #
+        # The table does not need to be voxelised at all: it is already a
+        # collision object, the ``output_table_live`` fence box below.
+        scene_frames = [
             head_scene_points(
                 depth,
                 K,
@@ -4647,27 +4886,32 @@ class RunOrchestrator:
             )
             for depth in depth_frames
         ]
-        observation = observe_output_table(
-            point_frames,
-            config,
-            require_candidates=require_place_candidate,
-        )
-        roi_center = (
-            np.asarray(config.table_roi_min)
-            + np.asarray(config.table_roi_max)
-        ) / 2.0
+        # Belt and braces: whatever of the carried bottle still survives the
+        # crop is an *attached* object, never an environment obstacle.
         per_frame_voxels = [
-            voxelize_scene_points(
-                points,
-                self.params,
-                center_base=roi_center,
+            self._scene_without_held_guard(
+                voxelize_scene_points(
+                    points,
+                    self.params,
+                    center_base=roi_center,
+                )
             )
-            for points in point_frames
+            for points in scene_frames
         ]
         self.scene_voxels = union_scene_voxels(
             per_frame_voxels, self.params
         )
         # Replace any authored output-table box with the live measured top.
+        #
+        # Extent deliberately stays the ROI and is NOT shrunk to the fitted
+        # points.  The fit is a *lower* bound on the table: this camera
+        # underreports the near edge -- that is the whole reason the crop
+        # mattered -- and on 2026-08-13 the operator could see the carried
+        # bottle overlapping tabletop that the point cloud placed 90 mm
+        # further out.  Too large a keepout refuses plans, which is visible
+        # and recoverable; too small lets the arm sweep through a table the
+        # model does not know is there.  The height is measured, the footprint
+        # is conservative.
         dynamic_table = FenceBox(
             id="output_table_live",
             minimum=(
@@ -4786,7 +5030,10 @@ class RunOrchestrator:
                         self.params,
                         min_depth_m=self.params.min_depth_m,
                         max_depth_m=self.params.max_depth_m,
-                        bottom_crop=0,
+                        # A row *limit*, so 0 asked for zero rows and this
+                        # check could only ever raise "有效点不足".  The
+                        # intent was the whole frame; say so.
+                        bottom_crop=int(np.asarray(depth).shape[0]),
                     ),
                     dtype=float,
                 )
@@ -4854,28 +5101,57 @@ class RunOrchestrator:
         offset = prior_offset
         evidence: list[dict] = []
 
+        supplied = getattr(self, "_operator_bottle_bottom_below_tcp_m", None)
+        measured_any = False
         for index in range(max_corrections + 1):
             self._abort_if_stopped()
             tcp = np.asarray(self.robot.current_tcp(), dtype=float)
-            bottom_z, support = self._measure_held_bottle_bottom_z(
-                table_height_m=table_height,
-                label=f"桌面放置视觉闭环第 {index + 1} 次观测",
-            )
-            measured_offset = float(tcp[2, 3]) - bottom_z
-            gap = bottom_z - table_height
-            # A measured offset far from the catalog prior means the cylinder
-            # caught something that is not the bottle, or the grasp is not
-            # where anyone thinks.  Neither may be lowered onto a table.
-            if (
-                abs(measured_offset - prior_offset)
-                > float(self.params.place_servo_offset_disagreement_m)
-            ):
-                raise SafetyAbort(
-                    "实测 TCP-瓶底偏移与商品表预期相差过大: "
-                    f"measured={measured_offset * 1000:.1f}mm "
-                    f"catalog={prior_offset * 1000:.1f}mm"
+            try:
+                bottom_z, support = self._measure_held_bottle_bottom_z(
+                    table_height_m=table_height,
+                    label=f"桌面放置视觉闭环第 {index + 1} 次观测",
                 )
-            offset = measured_offset
+                measured_any = True
+            except SafetyAbort:
+                # Reaching out over the table puts the bottle's underside at
+                # a grazing angle to a head camera that cannot tilt down, and
+                # the last centimetres are exactly where it disappears.  With
+                # no operator-supplied offset there is nothing left to fall
+                # back on and refusing is the only safe answer; with one, the
+                # descent proceeds open-loop on that number and every step
+                # remains bounded and revalidated.  The evidence records that
+                # it was never observed.
+                if supplied is None:
+                    raise
+                bottom_z = float(tcp[2, 3]) - float(supplied)
+                support = 0
+            measured_offset = float(tcp[2, 3]) - bottom_z
+            if supplied is None:
+                # A measured offset far from the catalog prior means the
+                # cylinder caught something that is not the bottle, or the
+                # grasp is not where anyone thinks.  Neither may be lowered
+                # onto a table.
+                if (
+                    abs(measured_offset - prior_offset)
+                    > float(self.params.place_servo_offset_disagreement_m)
+                ):
+                    raise SafetyAbort(
+                        "实测 TCP-瓶底偏移与商品表预期相差过大: "
+                        f"measured={measured_offset * 1000:.1f}mm "
+                        f"catalog={prior_offset * 1000:.1f}mm"
+                    )
+                offset = measured_offset
+            else:
+                # The operator measured this grip.  Keep observing, because
+                # the record is worth having, but do not let the observation
+                # steer or veto: on 2026-08-13 it read 88.6 mm and then
+                # 76.3 mm after a 12.3 mm step -- moving with the tool by
+                # exactly the step size, which is the signature of something
+                # standing still in the world.  The tabletop leaks past an
+                # 8 mm floor on a surface that tilts 22 mm across itself, so
+                # what the cylinder returns here is the table, not the bottle.
+                offset = float(supplied)
+            gap = float(tcp[2, 3]) - offset - table_height
             evidence.append(
                 {
                     "index": index,
@@ -4887,10 +5163,15 @@ class RunOrchestrator:
                 }
             )
             self.stage(
-                "桌面放置视觉闭环观测",
+                "桌面放置下降观测",
                 f"第 {index + 1} 次：瓶底距桌面 {gap * 1000:.1f} mm，"
-                f"实测 TCP-瓶底偏移 {measured_offset * 1000:.1f} mm"
-                f"（商品表 {prior_offset * 1000:.1f} mm）",
+                + (
+                    f"按操作者给定偏移 {offset * 1000:.1f} mm 下降"
+                    f"（相机同时读到 {measured_offset * 1000:.1f} mm，仅记录）"
+                    if supplied is not None
+                    else f"实测 TCP-瓶底偏移 {measured_offset * 1000:.1f} mm"
+                    f"（商品表 {prior_offset * 1000:.1f} mm）"
+                ),
             )
             if gap <= min_separation:
                 break
@@ -4922,17 +5203,28 @@ class RunOrchestrator:
                 "最后提交段超出单步上限，实测偏移可能不可信: "
                 f"remaining={remaining * 1000:.1f}mm"
             )
-        if remaining > 1e-6:
-            self._step_tcp_down(remaining, refreshed=refreshed)
+        # The loop exits at gap <= min_separation (25 mm) but a single leg is
+        # capped at max_step (12 mm), so committing the remainder in one go
+        # could only ever refuse itself.  Walk it down in bounded legs; each
+        # is revalidated in the current scene exactly as the loop's were.
+        while remaining > 1e-6:
+            leg = min(remaining, max_step)
+            self._step_tcp_down(leg, refreshed=refreshed)
+            remaining -= leg
         self.stage(
             "桌面放置视觉闭环完成",
-            f"实测偏移 {offset * 1000:.1f} mm，"
+            f"{'实测' if measured_any else '操作者给定'}偏移 "
+            f"{offset * 1000:.1f} mm，"
             f"瓶底停在桌面上方 {release_gap * 1000:.1f} mm",
         )
         return {
             "table_height_m": table_height,
             "catalog_offset_m": prior_offset,
             "measured_offset_m": offset,
+            "offset_was_observed": measured_any,
+            "operator_supplied_offset_m": (
+                None if supplied is None else float(supplied)
+            ),
             "release_gap_m": release_gap,
             "observations": evidence,
         }
@@ -4950,15 +5242,44 @@ class RunOrchestrator:
         path = interpolate_poses(
             matrix_pose(start), matrix_pose(goal), self.params.segment_m
         )
-        joints = self.robot.plan_ik(path, self.params)
-        self._validate_local_joint_path(
+        self._execute_output_local_joint_path(
             name="output_servo_step",
+            poses=path,
+            speed=self.params.final_speed,
+            refreshed=refreshed,
+        )
+
+    def _execute_output_local_joint_path(
+        self,
+        *,
+        name: str,
+        poses: Sequence[Sequence[float]],
+        speed: int,
+        refreshed,
+    ) -> list[list[float]]:
+        """Validate and execute one side-table leg as the same joint path."""
+        start_joints = list(map(float, self.robot.joints_deg()))
+        joints = self.robot.plan_ik(
+            poses,
+            self.params,
+            seed_joints_deg=start_joints,
+        )
+        self._validate_local_joint_path(
+            name=name,
             joints=joints,
             target_base=None,
+            start_joints_deg=start_joints,
             scene_points_override=self._output_contact_scene_voxels(refreshed),
         )
-        for pose in path:
-            self.robot.move_linear(pose, self.params.final_speed)
+        self.robot.execute_planned_joints(
+            joints,
+            speed,
+            self.params.planned_joint_step_deg,
+            expected_start_joints_deg=start_joints,
+            start_tolerance_deg=self.params.planned_start_tolerance_deg,
+            tracking_tolerance_deg=self.params.planned_tracking_tolerance_deg,
+        )
+        return joints
 
     def _output_candidate_poses(self, candidate) -> tuple[np.ndarray, np.ndarray]:
         config = self._side_table_config()
@@ -5037,6 +5358,23 @@ class RunOrchestrator:
         )
         return verified.trajectory, final_by_label[verified.target.label]
 
+    def _planned_bottle_xy(self, tcp: np.ndarray) -> np.ndarray:
+        """Where the held bottle's axis lands when the TCP reaches ``tcp``.
+
+        Uses the attached guard, which is the one description of the held
+        bottle's pose relative to the wrist that this run measured.
+        """
+        guard = getattr(self, "held_object_guard", None)
+        if not guard:
+            raise SafetyAbort("缺少 held guard，无法推算规划落瓶位置")
+        T_base_link7 = np.asarray(tcp, dtype=float) @ np.linalg.inv(
+            self.T_link7_tcp
+        )
+        centre = np.asarray(guard["center"], dtype=float)
+        if centre.shape != (3,) or not np.all(np.isfinite(centre)):
+            raise SafetyAbort("held guard 中心无效")
+        return (T_base_link7 @ np.r_[centre, 1.0])[:2]
+
     def _dispense_to_side_table(
         self, lifted_target: Localization, *, start: BodySnapshot | None = None
     ) -> None:
@@ -5068,9 +5406,16 @@ class RunOrchestrator:
         plan, final_tcp = self._plan_to_output_table(observation)
 
         refreshed = self._capture_output_table_scene()
+        # Compare like with like.  The refreshed candidates are *bottle* axis
+        # positions, so the planned point has to be the bottle's too, not the
+        # TCP's.  Under this grasp the TCP sits 63 mm from the bottle axis
+        # along the approach, and on 2026-08-13 passing the TCP made this
+        # check report exactly that 63 mm as drift on a table that had not
+        # moved -- height agreed to 0.2 mm in the same breath.
+        planned_bottle_xy = self._planned_bottle_xy(final_tcp)
         placement_still_valid(
             planned_table_height_m=observation.table_height_m,
-            planned_xy_base=final_tcp[:2, 3],
+            planned_xy_base=planned_bottle_xy,
             refreshed=refreshed,
             height_tolerance_m=float(config.refresh_height_tolerance_m),
             xy_tolerance_m=float(config.refresh_xy_tolerance_m),
@@ -5098,22 +5443,16 @@ class RunOrchestrator:
         lower_path = self._plan_local_leg(
             "桌面放低", build_lower_path, self.params
         )
-        lower_joints = self.robot.plan_ik(lower_path, self.params)
-        self._validate_local_joint_path(
+        self._execute_output_local_joint_path(
             name="output_lowering_execute",
-            joints=lower_joints,
-            target_base=None,
-            scene_points_override=self._output_contact_scene_voxels(
-                refreshed
-            ),
+            poses=lower_path,
+            speed=self.params.final_speed,
+            refreshed=refreshed,
         )
         self.stage(
             "桌面放低",
             "先降到视觉闭环接管的站位高度，最后一段交给实测瓶底",
         )
-        for pose in lower_path:
-            self.robot.move_linear(pose, self.params.final_speed)
-
         self._assert_landing_patch_clear_from_wrist(
             final_tcp, table_height_m=float(observation.table_height_m)
         )
@@ -5125,9 +5464,14 @@ class RunOrchestrator:
             encoding="utf-8",
         )
 
-        expected_release_point = np.asarray(
-            self.robot.current_tcp()[:3, 3], dtype=float
-        )
+        # Where the *bottle* was left, not where the tool ended up.  Under a
+        # horizontal grasp those differ by the approach offset, and on
+        # 2026-08-13 that turned a placement the camera confirmed at 3/3
+        # consensus and 1.0 mm spread into a 47.2 mm "release confirmation
+        # failed" -- against a bottle standing exactly where it was put.
+        release_tcp = np.asarray(self.robot.current_tcp(), dtype=float)
+        expected_release_point = np.empty(3, dtype=float)
+        expected_release_point[:2] = self._planned_bottle_xy(release_tcp)
         expected_release_point[2] = (
             observation.table_height_m
             + float(servo_record["measured_offset_m"])
@@ -5149,17 +5493,12 @@ class RunOrchestrator:
         retreat_path = self._plan_local_leg(
             "桌面释放后退开", build_retreat_path, self.params
         )
-        retreat_joints = self.robot.plan_ik(retreat_path, self.params)
-        self._validate_local_joint_path(
+        self._execute_output_local_joint_path(
             name="output_retreat_execute",
-            joints=retreat_joints,
-            target_base=None,
-            scene_points_override=self._output_contact_scene_voxels(
-                refreshed
-            ),
+            poses=retreat_path,
+            speed=self.params.travel_speed,
+            refreshed=refreshed,
         )
-        for pose in retreat_path:
-            self.robot.move_linear(pose, self.params.travel_speed)
         self._confirm_point_released(
             expected_release_point,
             label="右侧桌面释放三维确认",
@@ -5334,7 +5673,10 @@ class RunOrchestrator:
                 "观察后停止夹爪保护",
                 "stop-after-observation：保留当前夹爪状态，不下发闭夹命令",
             )
-        elif not getattr(self.args, "finish_from_current", False):
+        elif not (
+            getattr(self.args, "finish_from_current", False)
+            or getattr(self.args, "task_mode", None) == "from-held"
+        ):
             self._close_gripper_if_open(state)
 
     def _close_gripper_if_open(self, state: dict):

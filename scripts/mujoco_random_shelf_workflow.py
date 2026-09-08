@@ -166,7 +166,9 @@ place_config = SimpleNamespace(
     max_place_candidates=8,
 )
 observation = observe_output_table(
-    [np.vstack((support, columns))] * 3, place_config
+    [np.vstack((support, columns))] * 3, place_config,
+    # This simulated shelf exposes a 12 cm strip, not a full tabletop.
+    min_surface_extent_m=0.10,
 )
 target_x, target_y = observation.best.xy_base
 target_z = surface_z + 0.105

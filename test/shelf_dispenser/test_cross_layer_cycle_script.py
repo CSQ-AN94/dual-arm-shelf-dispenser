@@ -78,6 +78,20 @@ def test_lower_layer_pick_descends_before_planning_and_stops_after_the_tuck():
     assert source.index("PICK_ONLY_SUCCESS") < source.index("start_stack place")
 
 
+def test_side_table_delivery_branches_after_tuck_into_the_supported_task():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "DELIVERY_MODE=${DELIVERY_MODE:-lower_shelf}" in source
+    assert "lower_shelf|side_table" in source
+    branch = source.index('if [ "$DELIVERY_MODE" = side_table ]')
+    tuck = source.index('say "阶段 2.5')
+    shelf_lift = source.index('say "阶段 3  升降 647')
+    assert tuck < branch < shelf_lift
+    assert '--task-mode from-held' in source
+    assert '--mtc-pick-execution-record "$O/pick_record.json"' in source
+    assert '--shelf-layer-lift-mm "$PICK_LIFT_MM"' in source
+    assert 'echo CYCLE_SUCCESS' in source[branch:shelf_lift]
+
+
 def test_auto_layer_search_moves_only_on_typed_no_target():
     source = SCRIPT.read_text(encoding="utf-8")
     assert 'auto) PICK_LIFT_MM= ;;' in source

@@ -55,6 +55,31 @@ def _teaching_identity(demonstration: dict) -> tuple[str, str]:
     return match.group(1), arm_id
 
 
+def assert_planning_usable(demonstration: dict, *, label: str) -> list[dict]:
+    """The gate every taught trajectory passes before it may shape a plan.
+
+    A demonstration is evidence, not a plan: it was recorded by dragging the
+    arm and was never validated by anything except the recorder's own fence
+    check.  These are the conditions under which the recorder's verdict is
+    still meaningful today -- the schema it claims, the frame its poses are
+    in, its own fence result, and the recorder's explicit judgement that the
+    path is fit to constrain planning.  Returns the samples so callers do not
+    re-read them past a gate that just refused.
+    """
+    if (
+        demonstration.get("schema_version")
+        != "grabber.demonstrated_joint_trajectory.v1"
+        or demonstration.get("pose_frame") != "platform_base_link"
+        or demonstration.get("usable_for_planning_constraints") is not True
+        or demonstration.get("fence_violations")
+    ):
+        raise SafetyAbort(f"{label} 示教未通过规划约束门禁")
+    samples = demonstration.get("samples") or []
+    if len(samples) < 4:
+        raise SafetyAbort(f"{label} 示教样本不足")
+    return samples
+
+
 def _anchor_indices(xyz: np.ndarray) -> tuple[int, int]:
     end = xyz[-1]
     gate_index = 0
@@ -100,17 +125,7 @@ def build_relative_place_route(
     from a fixed global angle.
     """
     slot_id, arm_id = _teaching_identity(demonstration)
-    if (
-        demonstration.get("schema_version")
-        != "grabber.demonstrated_joint_trajectory.v1"
-        or demonstration.get("pose_frame") != "platform_base_link"
-        or demonstration.get("usable_for_planning_constraints") is not True
-        or demonstration.get("fence_violations")
-    ):
-        raise SafetyAbort(f"{slot_id} 放置示教未通过规划约束门禁")
-    samples = demonstration.get("samples") or []
-    if len(samples) < 4:
-        raise SafetyAbort(f"{slot_id} 放置示教样本不足")
+    samples = assert_planning_usable(demonstration, label=f"{slot_id} 放置")
     xyz = np.asarray(
         [sample["tcp_pose_moveit"]["xyz"] for sample in samples], dtype=float
     )

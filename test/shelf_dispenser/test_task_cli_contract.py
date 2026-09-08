@@ -26,6 +26,10 @@ def _validated(cli, *argv):
     return cli.validate_args(cli.build_parser().parse_args(list(argv)))
 
 
+def test_cli_help_renders_without_percent_format_failure(cli):
+    assert "1-100%" in cli.build_parser().format_help()
+
+
 def test_task_mode_allows_real_stop_after_observation_not_plan_only(cli):
     args = _validated(
         cli,
@@ -49,6 +53,37 @@ def test_task_mode_allows_the_same_process_confirmation_gate(cli):
     )
 
     assert args.confirm_before_grasp is True
+
+
+def test_from_held_requires_and_accepts_fresh_mtc_pick_evidence(cli, tmp_path):
+    record = tmp_path / "pick_record.json"
+    record.write_text("{}\n", encoding="utf-8")
+    args = _validated(
+        cli,
+        "--execute",
+        "--task-mode",
+        "from-held",
+        "--dispense",
+        "--delivery-safety-profile",
+        "side_table_template",
+        "--target-product",
+        "P01",
+        "--mtc-pick-execution-record",
+        str(record),
+    )
+
+    assert args.mtc_pick_execution_record == record
+
+    with pytest.raises(SystemExit, match="mtc-pick-execution-record"):
+        _validated(
+            cli,
+            "--execute",
+            "--task-mode",
+            "from-held",
+            "--dispense",
+            "--delivery-safety-profile",
+            "side_table_template",
+        )
 
 
 def test_task_mode_still_refuses_plan_only_and_mutually_exclusive_gates(cli):

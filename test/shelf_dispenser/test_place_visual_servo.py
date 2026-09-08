@@ -126,3 +126,39 @@ def test_a_bottle_already_below_the_release_height_aborts():
         demo._servo_bottle_onto_table(
             SimpleNamespace(table_height_m=TABLE_Z), refreshed=None
         )
+
+
+def test_servo_executes_the_validated_joint_path_not_sdk_movel():
+    """The controller must execute the same 7-axis path that was checked."""
+    demo = RunOrchestrator.__new__(RunOrchestrator)
+    demo.params = DemoParams(target_product_classes=("p01",))
+    demo.safety = SimpleNamespace(assert_tcp_point=lambda *_a, **_k: None)
+    demo._output_contact_scene_voxels = lambda _refreshed: []
+    demo._validate_local_joint_path = lambda **_kwargs: None
+    calls = []
+
+    class Robot:
+        def current_tcp(self):
+            return np.eye(4)
+
+        def joints_deg(self):
+            return [0.0] * 7
+
+        def plan_ik(self, _poses, _params, **kwargs):
+            calls.append(("plan_ik", kwargs))
+            return [[1.0] * 7]
+
+        def execute_planned_joints(self, points, speed, max_step, **kwargs):
+            calls.append(
+                ("execute", points, speed, max_step, kwargs)
+            )
+
+        def move_linear(self, _pose, _speed):
+            pytest.fail("validated IK was discarded and rm_movel was called")
+
+    demo.robot = Robot()
+    demo._step_tcp_down(0.005, refreshed=None)
+
+    execute = next(call for call in calls if call[0] == "execute")
+    assert execute[1] == [[1.0] * 7]
+    assert execute[4]["expected_start_joints_deg"] == [0.0] * 7

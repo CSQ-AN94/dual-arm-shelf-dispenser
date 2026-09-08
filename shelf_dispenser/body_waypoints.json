@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-13T18:19:58+08:00",
+  "robot_id": 10001,
+  "coordinate_frame": {
+    "name": "agv_pose_query_odometry",
+    "scope": "session_local",
+    "note": "Raw x/y/yaw are not permanent absolute coordinates. After an odometry reset or relocalization, re-anchor shelf_pick and apply the recorded relative transform."
+  },
+  "waypoints": {
+    "shelf_pick": {
+      "label": "preferred shelf picking stop",
+      "pose": {
+        "x_m": 1.696576,
+        "y_m": 2.946738,
+        "yaw_rad": 2.430644,
+        "yaw_deg": 139.265643
+      },
+      "lift_height_mm": 647,
+      "evidence": {
+        "kind": "successful_pick_start_snapshot",
+        "snapshot_path_on_robot": "/home/rm/pick_p01_20260813_173304/side_table_delivery_runtime/20260813_174129_753270_8eea2c87/shelf_ready_body_snapshot.json",
+        "pick_record_path_on_robot": "/home/rm/pick_p01_20260813_173304/pick_record.json"
+      }
+    },
+    "side_table_place": {
+      "label": "preferred side-table placing stop",
+      "pose": {
+        "x_m": 1.531577,
+        "y_m": 2.940452,
+        "yaw_rad": -2.104099,
+        "yaw_deg": -120.555992
+      },
+      "lift_height_mm": 515,
+      "evidence": {
+        "kind": "operator_positioned_static_snapshot",
+        "sample_count": 3,
+        "linear_mps": 0.0,
+        "angular_radps": 0.0,
+        "x_span_m": 0.0,
+        "y_span_m": 0.0,
+        "yaw_span_rad": 0.000015
+      }
+    }
+  },
+  "relative_transform": {
+    "from": "shelf_pick",
+    "to": "side_table_place",
+    "x_m": 0.120925,
+    "y_m": 0.112434,
+    "yaw_rad": 1.748442,
+    "yaw_deg": 100.178365
+  }
+}

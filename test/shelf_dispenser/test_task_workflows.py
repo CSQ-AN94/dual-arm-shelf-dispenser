@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import math
 import threading
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import numpy as np
@@ -10,6 +12,7 @@ import pytest
 
 from shelf_dispenser.core import DemoParams, Localization, SafetyAbort
 from shelf_dispenser.orchestrator import RunOrchestrator
+from shelf_dispenser.relative_place import product_geometry
 import shelf_dispenser.orchestrator as demo_module
 from shelf_dispenser.mobile_body import (
     ChassisState,
@@ -241,6 +244,10 @@ class FakeDemo:
         self.calls.append(("grasp_lift_from_pregrasp",))
         return self.lifted
 
+    def _resume_mtc_pick_for_delivery(self):
+        self.calls.append(("resume_mtc_held",))
+        return self.lifted
+
     def _place_back(self, wrist_target, lifted_target):
         assert wrist_target is self.wrist
         assert lifted_target is self.lifted
@@ -350,6 +357,104 @@ def test_dispense_uses_body_and_live_side_table_flow_before_home(tmp_path):
     ]
     assert result.status == RunStatus.DONE.value
     assert result.object_state == ObjectState.EMPTY.value
+
+
+def test_from_held_enters_only_the_existing_side_table_tail(tmp_path):
+    demo = FakeDemo(tmp_path, StartMode.FROM_HELD)
+    demo.args.dispense = True
+
+    result = BottlePickPlaceTask(demo).run(
+        StartMode.FROM_HELD, DeliverMode.DISPENSE
+    )
+
+    assert _hardware_calls(demo) == [
+        "capture_shelf_ready",
+        "initialize",
+        "preflight",
+        "preflight_delivery",
+        "resume_mtc_held",
+        "dispense_side_table",
+        "refresh_output_scene",
+        "return_home",
+        "right_arm_home_check",
+        "return_body",
+    ]
+    assert result.status == RunStatus.DONE.value
+    assert result.object_state == ObjectState.EMPTY.value
+
+
+def test_mtc_held_resume_rebuilds_guard_only_after_live_hold_and_tuck(tmp_path):
+    record = tmp_path / "pick_record.json"
+    record.write_text(
+        json.dumps(
+            {
+                "schema_version": "grabber.mtc_execution.v1",
+                "mode": "pick",
+                "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+                "completion": {
+                    "empty_close_pos": 0,
+                    "lift_start_mm": 647,
+                    "bottle_center_in_tcp_m": [0.0, 0.0, 0.05],
+                    "final_tcp_base_xyz_rpy_rad": [0.1, 0.2, 0.3, 0, 0, 0],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = SimpleNamespace(
+        source_lift_height_mm=647,
+        transport_joints_deg=[10.0] * 7,
+        held_bottle_diameter_m=0.07,
+        held_bottle_height_m=0.255,
+        held_bottle_guard_padding_m=0.02,
+    )
+
+    class Robot:
+        empty_close_pos = None
+
+        @staticmethod
+        def joints_deg():
+            return [10.0] * 7
+
+        @staticmethod
+        def gripper_state():
+            return {"dof_state": [3], "pos": [300], "current": [100]}
+
+        @staticmethod
+        def current_tcp():
+            tcp = np.eye(4)
+            tcp[2, 3] = 0.4
+            return tcp
+
+    demo = RunOrchestrator.__new__(RunOrchestrator)
+    demo.args = SimpleNamespace(mtc_pick_execution_record=record)
+    demo.params = DemoParams(target_product_classes=("P01",))
+    demo.safety = SimpleNamespace(tool_mount_calibration=None)
+    demo.robot = Robot()
+    demo.run_dir = tmp_path
+    demo.stage = lambda *_args: None
+    demo._side_table_config = lambda: config
+
+    target = demo._resume_mtc_pick_for_delivery()
+
+    np.testing.assert_allclose(target.point_base, [0.0, 0.0, 0.45])
+    assert demo.robot.empty_close_pos == 0
+    # Catalogued P01 (外星人电解质水): 68 mm wide, 215 mm tall, plus the
+    # profile's 20 mm guard padding.  Not the delivery profile's generic
+    # 70/255 -- that second copy made the guard 40 mm too tall and put its
+    # underside inside the tabletop box while the bottle was still tucked
+    # short of the real table, so MoveIt refused every plan from an invalid
+    # start state.  Geometry has one home, and it is the product catalog.
+    geometry = product_geometry("P01")
+    assert demo.held_object_guard["size"] == pytest.approx(
+        [
+            2.0 * geometry["radius_m"] + 0.02,
+            2.0 * geometry["radius_m"] + 0.02,
+            geometry["height_m"] + 0.02,
+        ]
+    )
+    assert demo.held_object_guard["size"] == pytest.approx([0.088, 0.088, 0.235])
+    assert (tmp_path / "mtc_held_resume.json").is_file()
 
 
 def test_delivery_mode_must_match_the_declared_dispense_flag_before_hardware(

@@ -62,13 +62,23 @@ def head_scene_points(
     T_base_camera: np.ndarray,
     params: DemoParams,
     *,
+    stride: int | None = None,
     min_depth_m: float | None = None,
     max_depth_m: float | None = None,
     bottom_crop: int | None = None,
 ) -> np.ndarray:
-    """Return the raw head point cloud in the right-arm base frame."""
+    """Return the raw head point cloud in the right-arm base frame.
+
+    ``stride`` subsamples the depth image.  The default of 6 is a collision
+    grid choice -- a 6.5 cm voxel does not get more accurate from more
+    samples -- but plane fitting is a counting argument, and a caller that
+    needs support rather than coverage may ask for a denser sweep of frames
+    that have already been captured.
+    """
     if depth is None or K is None:
         raise SafetyAbort("头部点云缺少深度或内参")
+    if stride is not None and not 1 <= int(stride) <= 32:
+        raise SafetyAbort("头部点云采样步长必须在 1..32")
     points, _, _, _ = _base_points(
         depth,
         K,
@@ -77,6 +87,7 @@ def head_scene_points(
         min_depth_m=min_depth_m,
         max_depth_m=max_depth_m,
         bottom_crop=bottom_crop,
+        **({} if stride is None else {"stride": int(stride)}),
     )
     return points
 
